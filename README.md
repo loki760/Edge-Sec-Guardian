@@ -1,242 +1,244 @@
-# Edge-Sec-Guardian: Stages 1–2
+# Edge-Sec-Guardian
 
-Offline IPv4 TCP/UDP packet analysis for a Raspberry Pi 5. Scapy reads a PCAP,
-packets are grouped into bidirectional flows, and each flow becomes one CSV row
-with five identification columns and 16 numerical features. Scapy is the only
-third-party dependency. Use Python 3.9 or newer. Developers can use either the
-virtual environment below or the optional Docker setup.
+Offline binary intrusion classification for UNSW-NB15 CSV records: a saved
+Random Forest pipeline predicts `normal` or `attack`, and optional native Ollama
+`llama3.2:1b` summarizes that result in the terminal. The Python container targets
+Linux ARM64 on a MacBook Pro M1. Training and prediction use local files;
+explanations use local HTTP. Internet access is needed for setup downloads only.
 
-## Docker development (Raspberry Pi 5 / ARM64)
+## Verified baseline
 
-The Dockerfile uses Python 3.13 on Debian Trixie, matching the Pi's tested
-Python major/minor version and distribution. It supports 64-bit Raspberry Pi OS
-on Pi 5, Apple Silicon Macs, and other Docker hosts. This is a project container,
-not a bootable Raspberry Pi OS image or hardware emulator: containers use the
-Docker host's Linux kernel. It covers offline PCAP analysis only.
+The complete pipeline is integrated on `feat/baseline-mvp`: official UNSW-NB15
+CSV → preprocessing → Random Forest → optional local Llama 3.2 1B → CLI.
+All **58 tests pass in ARM64 Docker**. Training used 175,341 official training
+records; evaluation used the separate 82,332-record held-out test split.
 
-Install [Docker Desktop](https://docs.docker.com/desktop/) on a Mac/Windows
-development machine, or [Docker Engine for Debian](https://docs.docker.com/engine/install/debian/)
-on a Pi running 64-bit Raspberry Pi OS/Debian. Start Docker before building.
-On Linux, the commands assume your user can access Docker; otherwise use `sudo`
-for Docker commands. A working, writable host filesystem is required.
+| Held-out metric | Value |
+| --- | ---: |
+| Accuracy | 0.870670 |
+| Attack precision | 0.817352 |
+| Attack recall | 0.985286 |
+| Attack F1 | 0.893497 |
+| False-positive rate | 26.98% |
 
-Clone and build the Pi-compatible ARM64 image:
+The confusion matrix is `[[27019, 9981], [667, 44665]]` (rows: actual normal,
+attack; columns: predicted normal, attack). There are **9,981 false positives
+among 37,000 benign test records**. This substantial false-positive rate is a
+baseline limitation; benchmark results do not establish live-network performance.
 
-```sh
-git clone https://github.com/loki760/Edge-Sec-Guardian.git
-cd Edge-Sec-Guardian
-docker build --platform linux/arm64 -t edge-sec-guardian:dev .
-```
+Docker prediction on test row 0 returned `attack` with score `0.7849`, and a real
+local Llama explanation was generated from that prediction. Dataset files and
+trained artifacts remain local and are not included in Git. See
+[data/README.md](data/README.md) for acquisition, verified hashes, attribution,
+and source details still requiring user confirmation.
 
-If you already have the repository, use its existing folder instead of cloning.
-The build downloads the Python base image and Scapy. Run all 16 tests:
+## Native Python setup
 
-```sh
-docker run --rm --platform linux/arm64 edge-sec-guardian:dev python -m unittest -v
-```
-
-Run the sample pipeline and save the CSV in your host's `data/` directory
-(Mac/Linux shell commands):
+Use Python 3.11–3.14; Docker below supplies Python 3.13. From the repository root:
 
 ```sh
-docker run --rm --platform linux/arm64 \
-  --user "$(id -u):$(id -g)" \
-  --mount "type=bind,source=$(pwd)/data,target=/app/data" \
-  edge-sec-guardian:dev
-```
-
-Expect 6 packets, 0 skipped, 3 flows, and `data/features.csv` on the host.
-The mount keeps output after the container exits; `--user` gives new files your
-host user's ownership. Existing output files must be writable by that user.
-The default image user has UID 1000. No privileged mode, host networking, or
-network capture capabilities are required for these offline commands.
-
-To analyze your own capture, put it in `data/` and override the default command:
-
-```sh
-docker run --rm --platform linux/arm64 \
-  --user "$(id -u):$(id -g)" \
-  --mount "type=bind,source=$(pwd)/data,target=/app/data" \
-  edge-sec-guardian:dev \
-  python extract_features.py --input data/my_capture.pcap --output data/my_features.csv
-```
-
-For editing code without rebuilding, mount the repository over `/app`:
-
-```sh
-docker run --rm -it --platform linux/arm64 \
-  --user "$(id -u):$(id -g)" \
-  --mount "type=bind,source=$(pwd),target=/app" \
-  edge-sec-guardian:dev sh
-```
-
-Inside, run `python -m unittest -v`, `python make_sample_pcap.py`, or the extractor.
-Rebuild after changing `requirements.txt`. On Intel/AMD laptops, Docker Desktop
-can emulate ARM64, which may be slower. For native x86 development, replace
-`linux/arm64` with `linux/amd64` in both the build and run commands. See
-[Docker's multi-platform guide](https://docs.docker.com/build/building/multi-platform/).
-
-The `.dockerignore` includes only the scripts, requirements, and supplied sample
-data in the build context. Virtual environments, Git history, credentials, and
-other local captures are excluded. Additional captures remain accessible through
-the explicit bind mount.
-
-Verified on 14 November 2026 using Docker Desktop on the ARM64 Mac: image build,
-all 16 tests, sample generation/extraction, host CSV output, and repository-mounted
-execution passed. The image ran Python 3.13.18 on aarch64. Runtime checks passed
-with networking disabled. This container has not yet been run on the physical Pi;
-its previously observed read-only SD filesystem still needs resolution before
-installing Docker or storing project files there.
-
-## Raspberry Pi setup
-
-From the Mac, connect using normal SSH authentication:
-
-```sh
-ssh shlok@192.168.2.2
-```
-
-On the Pi, inspect the existing environment first:
-
-```sh
-cat /etc/os-release
-uname -m
-python3 --version
-python3 -m pip --version
-git --version
-free -h
-df -h ~
-mkdir -p ~/edge-sec-guardian
-exit
-```
-
-Copy the project from the Mac (run from this repository's directory):
-
-```sh
-scp README.md requirements.txt .gitignore extract_features.py make_sample_pcap.py test_extract.py shlok@192.168.2.2:~/edge-sec-guardian/
-ssh shlok@192.168.2.2
-cd ~/edge-sec-guardian
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python -c "import sys, scapy; print(sys.version); print('Scapy', scapy.__version__)"
-```
-
-If `venv` creation reports that `ensurepip` is unavailable, and the OS check
-confirms Raspberry Pi OS/Debian/Ubuntu, install only the missing venv package:
-
-```sh
-sudo apt-get update
-sudo apt-get install python3-venv
-```
-
-Then repeat venv creation, activation, and installation. The venv supplies pip;
-system pip and Git are not required to run this program. If Python itself is
-missing on that OS family, install `python3` and `python3-venv` first. Do not
-run the extractor or pip with `sudo`.
-
-## Run
-
-Every new Pi terminal session needs activation:
-
-```sh
-cd ~/edge-sec-guardian
-source .venv/bin/activate
-python make_sample_pcap.py
 python -m unittest -v
-python extract_features.py --input data/sample.pcap --output data/features.csv
 ```
 
-The sample generator writes six deterministic packets into three flows. The
-extractor prints packet/skip counts, flow counts, and up to three flow summaries.
-The output directory is created if needed. A valid empty capture produces a CSV
-header with no rows. Missing files, empty files (without a PCAP header), and
-unrecognized capture formats produce a short error and a nonzero exit status.
+Direct dependencies are Scapy 2.6.1 (legacy utility), pandas 3.1.1 and
+scikit-learn 1.9.1. Use the same pins for training and prediction; the artifact
+records the exact scikit-learn version, and incompatible artifacts are rejected.
+Only load trusted project-generated pickle files.
 
-Tests use temporary files and check parsing, reverse grouping, counts, rates,
-all feature calculations, flags, port counts, singleton/zero-duration flows,
-timestamp ordering, unsupported/malformed packets, and CLI input/output.
-
-For the sample TCP flow from port 5000 to port 80, expect 2 forward packets,
-1 backward packet, 112 forward bytes, 54 backward bytes, 2 seconds duration,
-1.5 packets/second, and 83 bytes/second. Its SYN/RST/ACK ratios are 2/3, 1/3,
-and 2/3. The forward source has 3 distinct destination ports across the capture.
-
-## Feature definitions
-
-Forward is the first supported packet's source endpoint; backward is the reverse.
-CSV identifiers (`source_ip`, `destination_ip`, `source_port`, `destination_port`,
-`protocol`) use that first packet. TCP and UDP always form separate flows.
-Repeated connections with the same five-tuple are combined across the whole
-capture; this stage has no timeout or connection splitting.
-
-Packet length is `len(packet)`: captured bytes including the available link-layer
-header and payload. For Ethernet captures this normally excludes the FCS, preamble,
-and inter-frame gap. Other capture link types may have different headers. This is
-captured length, not the PCAP record's original on-wire length; incomplete IPv4
-datagrams are skipped. Compare features from captures using the same link type.
-
-| Feature | Definition and units |
-| --- | --- |
-| `flow_duration` | Latest minus earliest timestamp, seconds. |
-| `total_fwd_pkts` | Number of forward packets. |
-| `total_bwd_pkts` | Number of backward packets. |
-| `total_fwd_bytes` | Sum of forward packet lengths, bytes. |
-| `total_bwd_bytes` | Sum of backward packet lengths, bytes. |
-| `pkt_rate` | All flow packets divided by duration, packets/second. |
-| `byte_rate` | All flow bytes divided by duration, bytes/second. |
-| `pkt_len_mean` | Mean of all flow packet lengths, bytes. |
-| `pkt_len_std` | Population standard deviation of packet lengths, bytes. |
-| `pkt_len_max` | Largest packet length, bytes. |
-| `iat_mean` | Mean gap between consecutive chronologically sorted flow timestamps, seconds. |
-| `iat_std` | Population standard deviation of those gaps, seconds. |
-| `syn_ratio` | Packets with TCP SYN set divided by all flow packets. |
-| `rst_ratio` | Packets with TCP RST set divided by all flow packets. |
-| `ack_ratio` | Packets with TCP ACK set divided by all flow packets. |
-| `unique_dst_ports_by_src` | Distinct destination port numbers contacted by this flow's forward source IP across all supported packets in the PCAP, including packets that are backward in other flows; TCP/UDP port numbers share one set. |
-
-Rates are zero when duration is zero. A single-packet flow has zero duration,
-packet-length standard deviation, and IAT statistics. One IAT has zero standard
-deviation. UDP and missing TCP flags contribute no flags; combined TCP flags can
-contribute to several ratios. All ratios are unitless. Chronological sorting affects
-timing calculations only; first capture order still determines forward direction.
-
-IPv6, non-TCP/UDP traffic, fragmented IPv4 packets (including first fragments),
-and unsupported or malformed packet headers are skipped and counted. There is no
-fragment reassembly or checksum validation. Port counts exclude skipped packets.
-Packets stay in ordinary dictionaries/lists for the whole capture.
-
-## Scope and verification
-
-Implemented: offline parsing, bidirectional grouping, the 16 features, CSV export,
-a small Scapy sample generator, and unittest checks. Future stages can add model
-training and live analysis; neither is included here.
-
-Verified on the Raspberry Pi on 11 November 2026: Debian 13 (trixie), aarch64,
-Python 3.13.5, Scapy 2.6.1, Git 2.47.3, about 7 GiB available RAM and 100 GB
-free disk space. All 16 unittest cases passed. The complete sample pipeline
-processed 6 packets, skipped 0, found 3 flows, and saved a CSV with all 16
-features. `pip check` reported no broken requirements. Pi-generated
-`data/sample.pcap` and `data/features.csv` were copied back to this repository.
-
-**Permanent Stage 1 setup is blocked by the Pi's storage condition.** The kernel
-reported SD-card I/O errors and remounted the root filesystem read-only
-(`emergency_ro`). Creating `~/edge-sec-guardian` failed. No remount, filesystem
-repair, reboot, or system configuration change was attempted.
-
-Verification instead used a virtual environment in the Pi's writable RAM:
-`/tmp/edge-sec-guardian.4AwGiM/.venv`. The Pi's online pip installation failed,
-so the Scapy 2.6.1 wheel was downloaded on the Mac, copied to that directory,
-and installed with `pip --no-index`. Only Scapy was installed in the venv.
-
-Until this temporary directory is removed or the Pi reboots, rerun on the Pi:
+Download the original named splits from the official UNSW collection using the
+procedure in [data/README.md](data/README.md). Preserve their bytes and membership;
+place them under `data/raw/`, then verify them:
 
 ```sh
-cd /tmp/edge-sec-guardian.4AwGiM
-source .venv/bin/activate
-python -m unittest -v
-python extract_features.py --input data/sample.pcap --output data/features.csv
+mkdir -p data/raw artifacts
+python download_data.py
 ```
 
-Resolve the storage problem before completing the permanent setup under
-`~/edge-sec-guardian`; the temporary environment does not survive reboot.
+To reproduce the baseline, train and evaluate on the official splits. If a trusted
+model already exists, skip training and run prediction:
+
+```sh
+python train_model.py \
+  --train data/raw/UNSW_NB15_training-set.csv \
+  --test data/raw/UNSW_NB15_testing-set.csv \
+  --model artifacts/model.pkl --metrics artifacts/metrics.json
+python cli.py --input data/raw/UNSW_NB15_testing-set.csv --row 0
+```
+
+The full training split alone fits preprocessing and the forest. The unchanged
+test split is evaluation-only. The pipeline and measured metrics persist under
+`artifacts/`. No accuracy target or demonstration score is hard-coded.
+
+## One-record CLI
+
+```sh
+python cli.py --input data/raw/UNSW_NB15_testing-set.csv
+python cli.py --input data/raw/UNSW_NB15_testing-set.csv --row 10 --model artifacts/model.pkl
+python cli.py --input data/raw/UNSW_NB15_testing-set.csv --row 10 --explain
+python cli.py --help
+```
+
+`--input` is required. `--row` defaults to zero and counts data rows, excluding
+the header. Only one row is predicted. The shared loader validates the whole CSV;
+an invalid unselected row also causes rejection. Negative or out-of-range indices,
+missing files and invalid schemas fail clearly. `--model` defaults to
+`artifacts/model.pkl`. `--explain` is off by default; ML-only operation needs no
+Ollama service. `--ollama-url` defaults to `http://localhost:11434` and is used
+only with `--explain`.
+
+Input must contain all 42 UNSW features. Optional `id`, `attack_cat` and `label`
+columns are ignored during prediction and excluded from LLM input. Missing,
+duplicate or unexpected columns and invalid values are rejected. The legacy
+16-feature PCAP CSV is incompatible; there is no feature mapping or zero filling.
+
+Stdout contains `Row`, `Prediction` (including numeric label), and
+`Attack probability` rounded to four decimals. With `--explain`, `Explanation`
+contains the actual local response. Probability is an uncalibrated model score.
+Generated prose summarizes supplied values; it is not proof of the forest's
+reasoning and cannot change the classification.
+
+Exit codes: `0` for success, `1` for file/schema/model/runtime errors, `2` for
+argparse usage errors. If explanation generation fails, the prediction remains
+on stdout, `Explanation unavailable: <reason>` goes to stderr, and exit status
+is `1`. No fallback explanation is printed.
+
+## ARM64 Docker setup
+
+Start [Docker Desktop](https://docs.docker.com/desktop/) on the Mac. Build and test:
+
+```sh
+docker build --platform linux/arm64 -t edge-sec-guardian:cli .
+docker run --rm --platform linux/arm64 --network none \
+  edge-sec-guardian:cli python -m unittest -v
+```
+
+The image retains `python:3.13-slim-trixie`, runs as a non-root user (UID 1000),
+and defaults to CLI help. The build context admits only application modules,
+tests, requirements and the two legacy sample files. It excludes datasets,
+artifacts, credentials, Git history and caches. Rebuild after changing source or
+dependencies. The base image tag and transitive dependencies are not fully pinned,
+so future rebuilds may differ from the verified environment.
+
+Use bind mounts for local data and persistent model output. Create host
+directories first. Matching your host UID/GID prevents root-owned output files:
+
+```sh
+mkdir -p data/raw artifacts
+docker run --rm --platform linux/arm64 --network none \
+  --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$(pwd)/data,target=/app/data,readonly" \
+  --mount "type=bind,source=$(pwd)/artifacts,target=/app/artifacts" \
+  edge-sec-guardian:cli python train_model.py \
+  --train data/raw/UNSW_NB15_training-set.csv \
+  --test data/raw/UNSW_NB15_testing-set.csv \
+  --model artifacts/model.pkl --metrics artifacts/metrics.json
+
+docker run --rm --platform linux/arm64 --network none \
+  --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$(pwd)/data,target=/app/data,readonly" \
+  --mount "type=bind,source=$(pwd)/artifacts,target=/app/artifacts,readonly" \
+  edge-sec-guardian:cli python cli.py \
+  --input data/raw/UNSW_NB15_testing-set.csv --row 0
+```
+
+Place the official CSVs locally before training; prediction requires the saved
+model. These commands disable network access for training and ML-only prediction.
+To verify manually placed downloads inside Docker, mount the repository writable
+(the verifier updates `data/README.md`):
+
+```sh
+docker run --rm --platform linux/arm64 --network none \
+  --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$(pwd),target=/app" \
+  edge-sec-guardian:cli python download_data.py
+```
+
+## Native Ollama from Docker
+
+Install and run Ollama natively on macOS using [OLLAMA.md](OLLAMA.md). Download
+the exact model once during setup:
+
+```sh
+ollama pull llama3.2:1b
+ollama list
+```
+
+For CLI-only Ollama, start the server in another terminal with a loopback bind:
+
+```sh
+OLLAMA_HOST=127.0.0.1:11434 ollama serve
+```
+
+If the Ollama application is already serving that port, use its existing service.
+Ollama's default bind is loopback, as described in its
+[configuration documentation](https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network).
+On this Mac, Docker Desktop successfully reached the native service at
+`127.0.0.1:11434` through `host.docker.internal`; no wildcard bind or persistent
+macOS setting change was needed. Container localhost refers to the container.
+See [Docker's host service instructions](https://docs.docker.com/desktop/features/networking/#i-want-to-connect-from-a-container-to-a-service-on-the-host).
+
+Check connectivity and the installed exact model from the application image:
+
+```sh
+docker run --rm --platform linux/arm64 edge-sec-guardian:cli \
+  python -c 'import json; from urllib.request import build_opener, ProxyHandler; result = json.loads(build_opener(ProxyHandler({})).open("http://host.docker.internal:11434/api/tags", timeout=10).read()); print([model["name"] for model in result["models"]])'
+```
+
+With the saved model and native Ollama service available, request an explanation:
+
+```sh
+docker run --rm --platform linux/arm64 \
+  --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$(pwd)/data,target=/app/data,readonly" \
+  --mount "type=bind,source=$(pwd)/artifacts,target=/app/artifacts,readonly" \
+  edge-sec-guardian:cli python cli.py \
+  --input data/raw/UNSW_NB15_testing-set.csv --row 0 --explain \
+  --ollama-url http://host.docker.internal:11434
+```
+
+Keep Docker networking enabled for local HTTP. `--network none` also blocks
+host Ollama. After setup, disconnect external internet while retaining local
+connectivity to verify offline explanation operation. If connection fails,
+check that Ollama is serving, Docker Desktop is running, the URL uses
+`host.docker.internal`, and local firewall rules permit Docker Desktop access.
+No port publication, Ollama container, Compose stack or cloud inference is needed.
+
+## Separate legacy PCAP utility
+
+The retained Scapy utility groups bidirectional IPv4 TCP/UDP packets into flows
+and exports 16 numeric features with five identifiers. It is separate from the
+42-feature UNSW classifier. Its scripts, sample files and 16 tests are preserved:
+
+```sh
+python -m unittest test_extract -v
+python extract_features.py --input data/sample.pcap --output /tmp/legacy-features.csv
+
+docker run --rm --platform linux/arm64 --network none \
+  edge-sec-guardian:cli python extract_features.py \
+  --input data/sample.pcap --output /tmp/legacy-features.csv
+```
+
+The supplied sample has six packets in three flows. There is no live capture,
+web server, database or hardware deployment in this application.
+
+## Verification
+
+Final integration review on 14 November 2026 used the existing
+`edge-sec-guardian:baseline` image (Python 3.13.18, `aarch64`). Its Python source
+hashes matched the checkout. The `:cli` tag in the build commands above is a local
+name for an image built from the same Dockerfile.
+
+- All 58 tests passed with networking disabled and the checkout mounted read-only:
+  11 CLI, 11 model, 6 explanation, 16 legacy extractor, and 14 preprocessing tests.
+- `pip check` passed. Both dataset files matched their recorded hashes and counts.
+- Re-evaluating the saved model on every held-out row reproduced all saved metrics.
+- The real CLI returned `attack`, `0.7849` for row 0 and generated an explanation
+  through native Ollama at `host.docker.internal:11434` with read-only data/model
+  mounts. This check used local HTTP; it was not a network-disabled container run.
+
+Unit tests use small synthetic fixtures and mocked HTTP where appropriate; the
+separate real-data and local-model checks establish end-to-end operation. The
+review reused the existing image and model; it did not rebuild or retrain them.

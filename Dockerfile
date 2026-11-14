@@ -9,9 +9,12 @@ COPY requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home --uid 1000 developer
 
-COPY --chown=developer:developer extract_features.py make_sample_pcap.py test_extract.py ./
+# The allowlist also admits the ML owner's modules when they are integrated.
+COPY --chown=developer:developer *.py ./
 COPY --chown=developer:developer data/ ./data/
+RUN mkdir -p artifacts data/raw \
+    && chown -R developer:developer artifacts data
 
 USER developer
 
-CMD ["python", "extract_features.py", "--input", "data/sample.pcap", "--output", "data/features.csv"]
+CMD ["python", "cli.py", "--help"]
