@@ -1,0 +1,12 @@
+# Send only the files needed by the image to Docker.
+*
+!Dockerfile
+!.dockerignore
+!requirements.txt
+!extract_features.py
+!make_sample_pcap.py
+!test_extract.py
+!data/
+data/*
+!data/sample.pcap
+!data/features.csv

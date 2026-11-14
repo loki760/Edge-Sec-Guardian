@@ -3,7 +3,90 @@
 Offline IPv4 TCP/UDP packet analysis for a Raspberry Pi 5. Scapy reads a PCAP,
 packets are grouped into bidirectional flows, and each flow becomes one CSV row
 with five identification columns and 16 numerical features. Scapy is the only
-third-party dependency. Use Python 3.9 or newer.
+third-party dependency. Use Python 3.9 or newer. Developers can use either the
+virtual environment below or the optional Docker setup.
+
+## Docker development (Raspberry Pi 5 / ARM64)
+
+The Dockerfile uses Python 3.13 on Debian Trixie, matching the Pi's tested
+Python major/minor version and distribution. It supports 64-bit Raspberry Pi OS
+on Pi 5, Apple Silicon Macs, and other Docker hosts. This is a project container,
+not a bootable Raspberry Pi OS image or hardware emulator: containers use the
+Docker host's Linux kernel. It covers offline PCAP analysis only.
+
+Install [Docker Desktop](https://docs.docker.com/desktop/) on a Mac/Windows
+development machine, or [Docker Engine for Debian](https://docs.docker.com/engine/install/debian/)
+on a Pi running 64-bit Raspberry Pi OS/Debian. Start Docker before building.
+On Linux, the commands assume your user can access Docker; otherwise use `sudo`
+for Docker commands. A working, writable host filesystem is required.
+
+Clone and build the Pi-compatible ARM64 image:
+
+```sh
+git clone https://github.com/loki760/Edge-Sec-Guardian.git
+cd Edge-Sec-Guardian
+docker build --platform linux/arm64 -t edge-sec-guardian:dev .
+```
+
+If you already have the repository, use its existing folder instead of cloning.
+The build downloads the Python base image and Scapy. Run all 16 tests:
+
+```sh
+docker run --rm --platform linux/arm64 edge-sec-guardian:dev python -m unittest -v
+```
+
+Run the sample pipeline and save the CSV in your host's `data/` directory
+(Mac/Linux shell commands):
+
+```sh
+docker run --rm --platform linux/arm64 \
+  --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$(pwd)/data,target=/app/data" \
+  edge-sec-guardian:dev
+```
+
+Expect 6 packets, 0 skipped, 3 flows, and `data/features.csv` on the host.
+The mount keeps output after the container exits; `--user` gives new files your
+host user's ownership. Existing output files must be writable by that user.
+The default image user has UID 1000. No privileged mode, host networking, or
+network capture capabilities are required for these offline commands.
+
+To analyze your own capture, put it in `data/` and override the default command:
+
+```sh
+docker run --rm --platform linux/arm64 \
+  --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$(pwd)/data,target=/app/data" \
+  edge-sec-guardian:dev \
+  python extract_features.py --input data/my_capture.pcap --output data/my_features.csv
+```
+
+For editing code without rebuilding, mount the repository over `/app`:
+
+```sh
+docker run --rm -it --platform linux/arm64 \
+  --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$(pwd),target=/app" \
+  edge-sec-guardian:dev sh
+```
+
+Inside, run `python -m unittest -v`, `python make_sample_pcap.py`, or the extractor.
+Rebuild after changing `requirements.txt`. On Intel/AMD laptops, Docker Desktop
+can emulate ARM64, which may be slower. For native x86 development, replace
+`linux/arm64` with `linux/amd64` in both the build and run commands. See
+[Docker's multi-platform guide](https://docs.docker.com/build/building/multi-platform/).
+
+The `.dockerignore` includes only the scripts, requirements, and supplied sample
+data in the build context. Virtual environments, Git history, credentials, and
+other local captures are excluded. Additional captures remain accessible through
+the explicit bind mount.
+
+Verified on 14 November 2026 using Docker Desktop on the ARM64 Mac: image build,
+all 16 tests, sample generation/extraction, host CSV output, and repository-mounted
+execution passed. The image ran Python 3.13.18 on aarch64. Runtime checks passed
+with networking disabled. This container has not yet been run on the physical Pi;
+its previously observed read-only SD filesystem still needs resolution before
+installing Docker or storing project files there.
 
 ## Raspberry Pi setup
 
