@@ -8,22 +8,23 @@ Do not use third-party mirrors, the four larger raw CSV parts, or a new split.
 
 ## Acquisition status (14 November 2026)
 
-Automatic acquisition was blocked. The linked collection redirected the web
-fetcher to Microsoft sign-in. An independent `curl -I -L --max-time 30` request
-returned SharePoint access denied (`x-msdavext_error: 917656`) after redirects.
-No official CSV bytes were obtained. No substitute data was downloaded.
+Both named CSV files are present in `data/raw/` and passed schema, row-count,
+label, and hash verification. They were used for the completed training and
+held-out evaluation. The measured counts and hashes are preserved below.
 
-| Required local file | Expected records | Measured records | SHA-256 |
-| --- | ---: | --- | --- |
-| `data/raw/UNSW_NB15_training-set.csv` | 175,341 | Pending download | Unavailable |
-| `data/raw/UNSW_NB15_testing-set.csv` | 82,332 | Pending download | Unavailable |
+The known acquisition path is the official UNSW-NB15 dataset page → its linked
+SharePoint collection → CSV Files → Training and Testing Sets. Earlier automated
+access encountered sign-in/access-denied responses; the verifier subsequently
+found files already placed locally.
 
-Both official files must contain 45 columns: `id`, the 42 features in
-`preprocess.FEATURE_COLUMNS`, `attack_cat`, and `label`. The expected record
-counts above are from UNSW, not measurements made in this worktree. Retrieval
-dates, bytes, checksums, and real label counts remain pending. No official
-publisher SHA-256 was available on the dataset page; locally computed hashes
-fingerprint the acquired bytes and do not independently establish authenticity.
+**User confirmation still required:** the actual retrieval date, exact per-file
+source URLs (or folder/archive details if direct URLs are unavailable), and how
+the files were downloaded and placed locally. The verification timestamp below
+is not a download timestamp. Local hashes fingerprint the bytes; they do not
+independently establish official origin, and no publisher hash is recorded.
+
+Both files contain 45 columns: `id`, the 42 features in
+`preprocess.FEATURE_COLUMNS`, `attack_cat`, and `label`.
 
 ## Manual download procedure
 
@@ -36,14 +37,15 @@ fingerprint the acquired bytes and do not independently establish authenticity.
    browser downloads a ZIP, extract those two members without editing them.
    Do not open and re-save the CSVs in spreadsheet software.
 3. From the repository root run `mkdir -p data/raw`, then place the files at the
-   exact paths in the table. Keep original names and bytes. Record the actual
-   retrieval date and official per-file source URLs here when available.
+   paths `data/raw/UNSW_NB15_training-set.csv` and
+   `data/raw/UNSW_NB15_testing-set.csv`. Keep original names and bytes. Record
+   the actual retrieval date and official per-file source URLs here when available.
 4. Run `python download_data.py`. Existing files are verified in place, never
    overwritten. Success requires all schema/value checks, both binary labels,
    and the exact row count for each split. Success prints SHA-256 values and
    appends local measurements to the managed verification section below.
 5. Review the resulting provenance section, add the manual retrieval date/source
-   confirmation, and hand the verified paths to the ML Engineer before training.
+   confirmation before using newly acquired files for training.
 
 If the browser provides direct official HTTPS CSV download URLs usable without
 authentication, the same script can acquire missing files:
@@ -54,8 +56,9 @@ python download_data.py --training-url 'OFFICIAL_TRAINING_FILE_URL' --testing-ur
 
 These are explicit URL placeholders. The collection link is a folder, not a
 CSV endpoint, so the script does not guess a per-file URL or download the whole
-collection. Direct URLs must be on UNSW hosts or `unsw-my.sharepoint.com`;
-sign-in pages, invalid data, and redirects away from those hosts fail visibly.
+collection. The script checks the initial and final URLs for official HTTPS
+hosts; it does not validate intermediate redirects before following them.
+Sign-in pages, invalid data, and a final URL outside the allowed hosts fail visibly.
 Validated temporary bytes are published without replacing existing files. If
 one split fails, the script exits 1; any successfully acquired split is retained
 for the next run. An invalid existing file is reported, never silently replaced.
@@ -94,19 +97,14 @@ Run the synthetic unit tests (no network or real benchmark data required):
 python -m unittest test_preprocess -v
 ```
 
-Development verification used Python 3.14.3, pandas 3.1.1 and scikit-learn 1.9.1
-in `/tmp/edge-data-venv`, without changing global dependency files. These are
-observed test versions, not shared dependency pins. CLI/DevOps owns final pins
-and Linux ARM64 compatibility verification.
+All 14 preprocessing tests passed within the 58-test ARM64 Docker suite using
+Python 3.13.18, pandas 3.1.1 and scikit-learn 1.9.1. Final review independently
+verified both files against the measurements above and reproduced the saved
+held-out metrics. Real classifier-to-Llama integration also passed; see
+[the project README](../README.md).
 
-Observed result: all 13 synthetic unit tests passed. Running `download_data.py`
-without the missing official files returned exit 1 and clear placement errors.
-Real-data verification and full ML/LLM integration have not run.
-
-Keep downloaded CSVs and generated artifacts out of commits. This task leaves
-the shared `.gitignore` under CLI/DevOps ownership; that owner must add
-`data/raw/` before broad staging or integration. Stage only explicit owned source
-and documentation paths in the meantime. Existing `data/sample.pcap` and
+The existing `.gitignore` excludes `data/raw/` and `artifacts/`. Keep downloaded
+CSVs and generated models out of commits. Tracked `data/sample.pcap` and
 `data/features.csv` belong to the separate legacy PCAP demonstration.
 
 ## Attribution and use

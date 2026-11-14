@@ -1,7 +1,10 @@
 # Developer work allocation
 
-Status: planning only. Begin implementation only after the user reviews this plan
-and authorizes it. `ARCHITECTURE.md` is the shared interface contract.
+Status: the four components are implemented and merged into `feat/baseline-mvp`.
+Final integration review passed with 58 tests. This document retains the original
+ownership, dependencies, and acceptance criteria; it does not authorize new work.
+`ARCHITECTURE.md` is the shared interface contract. Dataset acquisition details
+still requiring user confirmation are listed in `data/README.md`.
 
 ## Exclusive file ownership
 
@@ -146,9 +149,9 @@ Acceptance criteria:
 Handoff: reproducible README commands, passing checks, actual integration results,
 and any observed limitations. No publishing, pushing, or deployment is implied.
 
-## Integration order and review
+## Original integration sequence (historical)
 
-1. Tech Lead obtains review of these planning files; no implementation yet.
+1. Tech Lead obtains review of the planning files before implementation.
 2. After implementation authorization, Data Engineer establishes schema and files;
    CLI/DevOps prepares minimal dependencies. LLM Engineer works against the written
    interface and documents local setup.

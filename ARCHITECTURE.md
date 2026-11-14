@@ -1,31 +1,32 @@
 # Edge-Sec-Guardian architecture
 
-Status: proposed implementation contract, ready for review. No application changes
-are part of this planning task. Commands and interfaces below describe future work.
+Status: implemented baseline contract. The integrated application passed final
+review with 58 tests; see `README.md` for measured results and execution commands.
 
-## Scope and existing repository
+## Scope and original repository
 
 Build a small offline binary intrusion classifier on a MacBook Pro M1 using Python,
 Linux ARM64 Docker, the official UNSW-NB15 CSV splits, a Random Forest, and local
 Ollama with `llama3.2:1b`. Output is a terminal result. No web UI, live capture,
 Raspberry Pi deployment, cloud inference, or attack-category classification.
 
-Inspected on 14 November 2026:
+Before implementation, the repository contained the following legacy components:
 
-| Existing files | Current purpose and reuse |
+| Original files | Purpose and reuse at the start of implementation |
 | --- | --- |
 | `extract_features.py` | Scapy PCAP reader; bidirectional IPv4 TCP/UDP flows; 5 identifiers and 16 numeric features. Keep as a separate utility. |
 | `make_sample_pcap.py`, `test_extract.py` | Six-packet sample generator and 16 existing extractor tests. Preserve them. |
 | `data/sample.pcap`, `data/features.csv` | PCAP demonstration inputs/output, not UNSW training data. |
-| `Dockerfile`, `.dockerignore` | Python 3.13 Debian container, non-root user, explicit allowlist, extractor default command. Adapt later for the CLI. |
-| `requirements.txt` | Currently only `scapy==2.6.1`. |
-| `README.md`, `.gitignore` | Existing PCAP/Pi documentation and basic Python exclusions. Update later under CLI/DevOps ownership. |
+| `Dockerfile`, `.dockerignore` | Python 3.13 Debian container, non-root user, explicit allowlist, extractor default command; subsequently adapted for the CLI. |
+| `requirements.txt` | Originally only `scapy==2.6.1`. |
+| `README.md`, `.gitignore` | PCAP/Pi documentation and basic Python exclusions; subsequently updated for the baseline. |
 
-There is no existing classifier, UNSW loader, saved ML model, or LLM integration.
-The README's Pi/live-analysis future scope is historical; this plan defines the new
-scope. Reuse the simple functions, argparse style, unittest approach, and container
-foundation, but do not feed `data/features.csv` into the new classifier. Names such
-as `flow_duration` and `dur` do not establish semantic equivalence. UNSW uses a
+The classifier, UNSW loader, saved pipeline, and LLM integration are now implemented.
+The table records the starting point, not the current Docker/dependency setup.
+The earlier Pi/live-analysis scope is historical. Retain the simple functions,
+argparse style, unittest approach, and container foundation, but do not feed
+`data/features.csv` into the classifier. Names such as `flow_duration` and `dur`
+do not establish semantic equivalence. UNSW uses a
 different extraction process and additional contextual features. No adapter,
 renaming scheme, or zero-filled missing-feature workaround is in scope.
 
@@ -96,7 +97,7 @@ ct_ftp_cmd, ct_flw_http_mthd, ct_src_ltm, ct_srv_dst, is_sm_ips_ports
 ## Module interfaces
 
 Use ordinary functions, pandas DataFrames, dictionaries, and standard exceptions.
-These signatures and field names are shared contracts, not code to implement now.
+These signatures and field names define the shared module contracts.
 
 | Owner/module | Interface | Contract |
 | --- | --- | --- |
@@ -159,7 +160,7 @@ The prediction dictionary has exactly these fields:
 | `prediction` | String `normal` for 0, `attack` for 1. |
 | `attack_probability` | Float in `[0, 1]` from `predict_proba`, selecting the column whose classifier class is `1`. This is a model score, not a calibrated guarantee. |
 
-Proposed commands (after implementation):
+Implemented commands:
 
 ```sh
 python download_data.py

@@ -1,6 +1,6 @@
 # Local Llama explanations
 
-Run Ollama natively on the Mac; the future Linux ARM64 Python container calls
+Run Ollama natively on the Mac; the Linux ARM64 Python container calls
 that host service. No Python SDK or extra dependency is required.
 
 ## One-time setup
@@ -62,21 +62,20 @@ The prompt requests 2–3 cautious sentences and a proportionate recommended
 action. Generated prose is an unverified summary, not causal feature attribution
 or proof of an attack. A small model can still disregard prompt instructions.
 The caller must keep it separate from the actual Random Forest decision. Neither
-input dictionary is changed. If generation fails, the future CLI must preserve
-its prediction output, report `Explanation unavailable: <reason>` on stderr,
-omit the explanation field, and return exit code 1.
+input dictionary is changed. If generation fails, the CLI preserves its prediction
+output, reports `Explanation unavailable: <reason>` on stderr, omits the
+explanation field, and returns exit code 1. Generated wording may still imply
+confidence that the uncalibrated score does not establish; treat it as unverified.
 
-## Docker handoff
+## Docker execution
 
-The future CLI must pass `--ollama-url http://host.docker.internal:11434`.
-The container's localhost points to the container itself. Binding and Docker
-Desktop verification belong to CLI/DevOps. The service started for this work
-listens on loopback only; Docker access has not been verified. If the Docker
-Desktop setup needs another host binding, CLI/DevOps should configure and test
-it deliberately; a wildcard bind can expose Ollama to other machines. The
-Python application and model runtime stay separate; do not install Ollama or
-bake its weights into the Python image. External internet can be disconnected
-after downloads, while local HTTP must remain reachable.
+Pass `--ollama-url http://host.docker.internal:11434`; container localhost points
+to the container itself. Docker Desktop access to the native loopback-bound
+service was verified on this Mac without a wildcard bind. Keep local HTTP
+reachable: `--network none` blocks host Ollama as well as external services.
+Ollama and its weights remain outside the Python image. See the
+[README Docker commands](README.md#native-ollama-from-docker) for read-only data
+and model mounts and the complete CLI invocation.
 
 ## Tests and integration status
 
@@ -89,8 +88,8 @@ fields, metadata exclusion, unchanged input dictionaries, custom host/timeout,
 response failures, transport failures, and local-only model/URL behavior. They
 are not evidence of real Llama generation.
 
-After the Data/ML modules and trusted trained artifact are available, reproduce
-full integration using the shared prediction result:
+With the local CSVs, trusted trained artifact, and Ollama service available,
+reproduce native Python integration using the shared prediction result:
 
 ```python
 from preprocess import load_csv
@@ -104,23 +103,12 @@ print(result)
 print(explain_prediction(row.iloc[0].to_dict(), result))
 ```
 
-No ML modules, official dataset, or model artifact were present in this checkout
-at implementation time. An explanation based on an actual classifier prediction
-and Docker-to-host integration therefore remain pending with their owners.
+Verified on 14 November 2026 on the Apple M1 Pro:
 
-Verified on 14 November 2026 on this Mac (Apple M1 Pro, native ARM64):
+- Native Ollama 0.35.1 served `llama3.2:1b`; setup recorded model ID
+  `baf6a787fdff` and size 1.3 GB.
+- The Docker CLI loaded the real classifier, predicted test row 0 as `attack`
+  with score `0.7849`, and received a real local Llama summary recommending review.
+- All six explanation tests passed within the complete 58-test Docker suite.
 
-- Existing Ollama CLI version 0.35.1 was used; no reinstall was needed.
-- Started `ollama serve` on `127.0.0.1:11434`; Metal detected Apple M1 Pro.
-- `ollama pull llama3.2:1b` completed with digest verification. `ollama list`
-  reported model ID `baf6a787fdff`, size 1.3 GB.
-- The `ollama run` command above returned a real sentence describing packets.
-- A separate standard-library POST to `http://localhost:11434/api/generate`,
-  with the same packet question, `stream: false`, `temperature: 0`,
-  `num_predict: 160`, and timeout 60 returned `model: llama3.2:1b`, `done: true`,
-  nonempty generated prose, and `eval_count: 55`.
-- `python3 -m unittest test_explain -v`: all six tests passed.
-
-These were real native generation checks with a general networking question,
-not an ML prediction demonstration. The actual classifier integration above is
-still pending. No generated response is installed as an application fallback.
+No generated response is installed as an application fallback.

@@ -1,11 +1,11 @@
 # Common developer instructions
 
-## Current authorization
+## Project status and authorization
 
-This task is planning only: create/review `ARCHITECTURE.md`, `TASKS.md`, and this
-file, then stop. Do not implement the application, modify existing functional code,
-spawn subagents, commit, or push unless a later user instruction authorizes it.
-The allocation in `TASKS.md` describes future work, not permission to start it.
+The baseline is implemented and has passed final integration review. `TASKS.md`
+records component ownership and acceptance criteria. Follow the current user's
+authorized scope; these documents do not authorize new features, subagents,
+commits, or pushes on their own.
 
 ## Scope and contracts
 
@@ -15,8 +15,8 @@ The allocation in `TASKS.md` describes future work, not permission to start it.
   Llama 3.2 1B explanation, and CLI/Docker setup for the M1 Mac and Linux ARM64.
 - No UI, API server, live monitoring, Raspberry Pi work, cloud LLM, database,
   orchestration framework, agent framework, or unnecessary infrastructure.
-- Existing README Pi instructions describe the previous project scope. The new
-  architecture governs this work; CLI/DevOps updates README during implementation.
+- `README.md` describes the working application. Historical Pi work is outside
+  the current scope; preserve the architecture's offline CSV/CLI boundary.
 - Edit only your assigned files. Ask the owner for shared-file changes. Bring
   schema/interface changes to the Tech Lead before implementation.
 

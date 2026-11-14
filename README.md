@@ -6,17 +6,31 @@ Random Forest pipeline predicts `normal` or `attack`, and optional native Ollama
 Linux ARM64 on a MacBook Pro M1. Training and prediction use local files;
 explanations use local HTTP. Internet access is needed for setup downloads only.
 
-## Integration status
+## Verified baseline
 
-This `agent/cli` checkout contains the data loader, local explanation module,
-CLI and unit tests. Agent 2's `train_model.py`, `predict.py`, `test_model.py` and
-trusted trained artifact are not yet integrated. Training and genuine prediction
-commands below require that handoff. There is no substitute prediction module.
-The CLI reports a concise error if the ML module is unavailable.
+The complete pipeline is integrated on `feat/baseline-mvp`: official UNSW-NB15
+CSV → preprocessing → Random Forest → optional local Llama 3.2 1B → CLI.
+All **58 tests pass in ARM64 Docker**. Training used 175,341 official training
+records; evaluation used the separate 82,332-record held-out test split.
 
-Official CSVs are also absent from this worktree. See [data/README.md](data/README.md)
-for acquisition, verification, provenance and dataset attribution. No benchmark
-metrics or full ML-to-Llama execution are claimed here.
+| Held-out metric | Value |
+| --- | ---: |
+| Accuracy | 0.870670 |
+| Attack precision | 0.817352 |
+| Attack recall | 0.985286 |
+| Attack F1 | 0.893497 |
+| False-positive rate | 26.98% |
+
+The confusion matrix is `[[27019, 9981], [667, 44665]]` (rows: actual normal,
+attack; columns: predicted normal, attack). There are **9,981 false positives
+among 37,000 benign test records**. This substantial false-positive rate is a
+baseline limitation; benchmark results do not establish live-network performance.
+
+Docker prediction on test row 0 returned `attack` with score `0.7849`, and a real
+local Llama explanation was generated from that prediction. Dataset files and
+trained artifacts remain local and are not included in Git. See
+[data/README.md](data/README.md) for acquisition, verified hashes, attribution,
+and source details still requiring user confirmation.
 
 ## Native Python setup
 
@@ -43,7 +57,8 @@ mkdir -p data/raw artifacts
 python download_data.py
 ```
 
-After the ML handoff, train and evaluate once on the official splits:
+To reproduce the baseline, train and evaluate on the official splits. If a trusted
+model already exists, skip training and run prediction:
 
 ```sh
 python train_model.py \
@@ -103,8 +118,9 @@ docker run --rm --platform linux/arm64 --network none \
 The image retains `python:3.13-slim-trixie`, runs as a non-root user (UID 1000),
 and defaults to CLI help. The build context admits only application modules,
 tests, requirements and the two legacy sample files. It excludes datasets,
-artifacts, credentials, Git history and caches. Rebuild after ML modules are
-integrated; the allowlist already includes their agreed filenames.
+artifacts, credentials, Git history and caches. Rebuild after changing source or
+dependencies. The base image tag and transitive dependencies are not fully pinned,
+so future rebuilds may differ from the verified environment.
 
 Use bind mounts for local data and persistent model output. Create host
 directories first. Matching your host UID/GID prevents root-owned output files:
@@ -128,8 +144,8 @@ docker run --rm --platform linux/arm64 --network none \
   --input data/raw/UNSW_NB15_testing-set.csv --row 0
 ```
 
-These commands need Agent 2's integrated modules and real data/model. They
-explicitly disable network access for training and ML-only prediction.
+Place the official CSVs locally before training; prediction requires the saved
+model. These commands disable network access for training and ML-only prediction.
 To verify manually placed downloads inside Docker, mount the repository writable
 (the verifier updates `data/README.md`):
 
@@ -171,7 +187,7 @@ docker run --rm --platform linux/arm64 edge-sec-guardian:cli \
   python -c 'import json; from urllib.request import build_opener, ProxyHandler; result = json.loads(build_opener(ProxyHandler({})).open("http://host.docker.internal:11434/api/tags", timeout=10).read()); print([model["name"] for model in result["models"]])'
 ```
 
-After ML integration, request an actual prediction explanation:
+With the saved model and native Ollama service available, request an explanation:
 
 ```sh
 docker run --rm --platform linux/arm64 \
@@ -208,37 +224,21 @@ docker run --rm --platform linux/arm64 --network none \
 The supplied sample has six packets in three flows. There is no live capture,
 web server, database or hardware deployment in this application.
 
-## Verification and remaining handoff
+## Verification
 
-CLI unit tests use synthetic CSVs and mocked prediction/explanation functions;
-they are not an end-to-end demonstration. Run them independently with:
+Final integration review on 14 November 2026 used the existing
+`edge-sec-guardian:baseline` image (Python 3.13.18, `aarch64`). Its Python source
+hashes matched the checkout. The `:cli` tag in the build commands above is a local
+name for an image built from the same Dockerfile.
 
-```sh
-python -m unittest test_cli -v
-```
+- All 58 tests passed with networking disabled and the checkout mounted read-only:
+  11 CLI, 11 model, 6 explanation, 16 legacy extractor, and 14 preprocessing tests.
+- `pip check` passed. Both dataset files matched their recorded hashes and counts.
+- Re-evaluating the saved model on every held-out row reproduced all saved metrics.
+- The real CLI returned `attack`, `0.7849` for row 0 and generated an explanation
+  through native Ollama at `host.docker.internal:11434` with read-only data/model
+  mounts. This check used local HTTP; it was not a network-disabled container run.
 
-Verified on 14 November 2026:
-
-- Native Python 3.14: all 11 CLI unit tests and the full 47-test suite passed.
-- `docker build --platform linux/arm64 -t edge-sec-guardian:cli .` passed.
-  The image runs Python 3.13.18 on `aarch64` as UID 1000. The pinned direct
-  dependencies installed successfully, and `pip check` found no broken requirements.
-- All 47 tests passed in that image with `--network none`: 11 CLI, 6 explanation,
-  16 unchanged extractor and 14 data/preprocessing tests. Agent 2's model tests
-  are not present and are not included in this count.
-- The unchanged extractor processed the six-packet sample into three flows with
-  networking disabled, writing a temporary bind-mounted CSV owned by the host user.
-- Docker Desktop reached native Ollama's `/api/tags` through
-  `host.docker.internal:11434`; `llama3.2:1b` was present. The native listener
-  remained on `127.0.0.1:11434`.
-- A real `/api/generate` request from the new application image to that native
-  service returned `model: llama3.2:1b`, `done: true`, nonempty generated prose
-  and 55 generated tokens for a general packet-definition question. This was
-  a connectivity/generation check, not a classifier explanation.
-
-Agent 2 must supply `train_model.py`, `predict.py`, `test_model.py`, the trusted
-model and measured evaluation results using the shared dependency pins. Official
-CSV paths must be available in this worktree, with provenance confirmed. Then
-rebuild, run the complete suite including model tests, and verify genuine
-training/prediction and `--explain` with external internet disconnected. No such
-full-pipeline result is claimed by the CLI unit tests or a general Ollama prompt.
+Unit tests use small synthetic fixtures and mocked HTTP where appropriate; the
+separate real-data and local-model checks establish end-to-end operation. The
+review reused the existing image and model; it did not rebuild or retrain them.
