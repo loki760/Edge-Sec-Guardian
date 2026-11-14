@@ -42,7 +42,7 @@ def load_csv(path, require_label=False):
     CSV parsing preserves literal categorical tokens such as 'None' and '-'.
     """
     try:
-        with open(path, encoding="utf-8", newline="") as source:
+        with open(path, encoding="utf-8-sig", newline="") as source:
             reader = csv.reader(source, strict=True)
             header = next(reader, None)
             if not header:
