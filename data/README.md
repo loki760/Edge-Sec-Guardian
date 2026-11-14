@@ -62,7 +62,15 @@ for the next run. An invalid existing file is reported, never silently replaced.
 The script requires pandas and scikit-learn because it uses the shared loader.
 
 <!-- verification:start -->
-No successful local official-split verification yet.
+
+Successful local verification: 2026-11-14T16:58:44.210696+00:00
+
+- `UNSW_NB15_training-set.csv`: 175,341 rows, 45 columns, 32293018 bytes; labels {1: 119341, 0: 56000}.
+  SHA-256: `bec7dd5ec88dc2a0ccc7a07879d338395ed7421750f675fd0339e07dfe0648fa`.
+  Acquisition: Existing file; manual placement/source must be confirmed by the operator.
+- `UNSW_NB15_testing-set.csv`: 82,332 rows, 45 columns, 15380800 bytes; labels {1: 45332, 0: 37000}.
+  SHA-256: `734fe6642edf758f7c94d7d9149426b49d202fe8e7bf0bef47392489c3c0a559`.
+  Acquisition: Existing file; manual placement/source must be confirmed by the operator.
 <!-- verification:end -->
 
 ## Loader and preprocessing
