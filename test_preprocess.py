@@ -59,6 +59,23 @@ class PreprocessTests(unittest.TestCase):
         self.assertTrue(features.equals(other))
         self.assertIsNone(labels)
 
+    def test_bom_prefixed_header_and_unchanged_bytes(self):
+        self.write_csv([self.row, dict(self.row, label="1", id="2")])
+        original = b"\xef\xbb\xbf" + self.path.read_bytes()
+        self.path.write_bytes(original)
+        for require_label in [False, True]:
+            with self.subTest(require_label=require_label):
+                features, labels = load_csv(self.path, require_label=require_label)
+                self.assertEqual(list(features.columns), FEATURE_COLUMNS)
+                self.assertEqual(features.shape, (2, 42))
+                if require_label:
+                    self.assertEqual(labels.tolist(), [0, 1])
+                else:
+                    self.assertIsNone(labels)
+        result = download_data.verify_file(self.path, 2)
+        self.assertEqual(result["sha256"], hashlib.sha256(original).hexdigest())
+        self.assertEqual(self.path.read_bytes(), original)
+
     def test_missing_duplicate_unexpected_columns(self):
         for header, message in [
             (self.header[1:], "missing"),

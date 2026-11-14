@@ -27,7 +27,7 @@ SPLITS = {
 
 
 def verify_file(path, expected_rows):
-    """Check the full labeled schema and return a local byte fingerprint."""
+    """Validate via the BOM-aware UTF-8 loader; fingerprint unchanged file bytes."""
     features, labels = load_csv(path, require_label=True)
     if len(features) != expected_rows:
         raise ValueError(f"{path}: expected {expected_rows} records, got {len(features)}")
