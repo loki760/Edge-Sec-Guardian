@@ -145,7 +145,7 @@ class ExtractFeaturesTests(unittest.TestCase):
         self.assertEqual(ports, {})
 
     def test_missing_tcp_flags(self):
-        packet = Ether(bytes(Ether() / IP() / TCP()))
+        packet = Ether(bytes(Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP() / TCP()))
         packet[TCP].flags = None
         parsed = parse_packet(packet)
         self.assertIsNotNone(parsed)

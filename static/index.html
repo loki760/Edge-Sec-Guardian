@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Edge-Sec Guardian | Traffic monitor</title>
+<style>
+:root{color-scheme:dark;font:16px/1.5 "Segoe UI",Arial,sans-serif;background:#101819;color:#edf5ee}
+*{box-sizing:border-box}body{margin:0}main,header>div{max-width:1300px;margin:auto;padding:0 clamp(16px,4vw,60px)}
+header{background:#192827;border-bottom:1px solid #40524e}header>div,.heading,.alert-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+header>div{min-height:64px}strong.brand{letter-spacing:.04em}.dot{color:#8fe2ad}.heading{margin:32px 0 22px}h1,h2,p{margin:0}h1{font-size:clamp(26px,4vw,42px);letter-spacing:-.045em}h2{font-size:20px;letter-spacing:-.02em}
+section{border:1px solid #344743;background:#182322;border-radius:12px;margin-bottom:20px;padding:20px}
+#metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:16px;margin:18px 0 0}
+dt,th,.sub,small{font-size:13px;color:#adc1b8}dd{margin:2px 0 0;font-size:21px;font-variant-numeric:tabular-nums}
+#banner,.alert{padding:12px 16px;background:#282b22;border-left:3px solid #eabc70;margin-top:14px}
+.badge{border-radius:4px;background:#544027;color:#ffdf9e;padding:2px 8px;font-size:13px}
+button{background:#30443e;color:#eaf6ef;border:1px solid #60786b;border-radius:5px;padding:6px 11px;cursor:pointer;margin:8px 8px 0 0}
+button:focus-visible{outline:2px solid #b6f5cd}button:disabled{opacity:.65}ul{margin:8px 0;padding-left:20px}.scroll{overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:14px;white-space:nowrap;margin-top:16px}td,th{padding:10px 12px;text-align:left;border-top:1px solid #374742}td{font-variant-numeric:tabular-nums}
+td.flag{color:#f5ce87}.empty{padding:14px 0;color:#adc1b8}#banner[hidden]{display:none}
+</style></head><body>
+<header><div><strong class="brand">Edge-Sec Guardian</strong><span id="connection" role="status">Connecting…</span></div></header>
+<main><div class="heading"><h1>Traffic monitor</h1><span class="sub" id="mode"></span></div>
+<section><h2>Real-time device benchmarks</h2><dl id="metrics"></dl></section>
+<section><h2>Live alerts</h2><p id="banner" role="status" hidden></p><div id="alerts"></div></section>
+<section><h2>Live traffic</h2><div class="scroll"><table><thead><tr><th>Flow start</th><th>Source → destination</th><th>Protocol</th><th>Packets in / out</th><th>Bytes in / out</th><th>Duration (ms)</th><th>Verdict</th></tr></thead><tbody id="traffic"></tbody></table></div><p id="empty" class="empty">Waiting for completed flows.</p></section>
+</main><script>
+const byId = id => document.getElementById(id);
+function node(tag, value, cls) {
+  const el = document.createElement(tag);
+  if (value != null) el.textContent = value;
+  if (cls) el.className = cls;
+  return el;
+}
+const endpoint = m => m.src_ip + ':' + m.src_port + ' → ' + m.dst_ip + ':' + m.dst_port;
+let highest = 0, alertVersion = '';
+async function feedback(id, value, button) {
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/alerts/' + id + '/feedback', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({feedback:value})
+    });
+    if (!response.ok) throw Error();
+    await refresh();
+  } catch {
+    byId('banner').hidden = false;
+    byId('banner').textContent = 'Feedback could not be saved. Try again.';
+  } finally { button.disabled = false; }
+}
+function renderAlerts(alerts) {
+  const version = JSON.stringify(alerts.map(a => [a.id,a.feedback]));
+  if (version === alertVersion) return;
+  alertVersion = version;
+  const cards = alerts.map(a => {
+    const card = node('article', null, 'alert'), head = node('div', null, 'alert-head');
+    head.append(node('strong', endpoint(a.metadata)), node('span', a.severity, 'badge'));
+    card.append(head, node('small', a.scoring + ' · ' + new Date(a.metadata.flow_start_ts*1000).toLocaleString()));
+    const signals = node('ul');
+    a.signals.forEach(s => signals.append(node('li', s)));
+    card.append(signals, node('p', a.explanation));
+    if (a.feedback) card.append(node('strong', a.feedback === 'confirmed' ? 'Confirmed threat' : 'Dismissed'));
+    else for (const [label,value] of [['Confirm Threat','confirmed'],['Dismiss','dismissed']]) {
+      const b = node('button',label);
+      b.onclick = () => feedback(a.id,value,b);
+      card.append(b);
+    }
+    return card;
+  });
+  byId('alerts').replaceChildren(...(cards.length ? cards : [node('p','No flagged flows.','empty')]));
+  if (alerts.length && alerts[0].id > highest) {
+    const banner = byId('banner');
+    banner.hidden = false;
+    banner.textContent = (highest ? 'New alert' : 'Latest alert') + ' · ' + endpoint(alerts[0].metadata);
+    highest = alerts[0].id;
+  }
+}
+async function refresh() {
+  try {
+    const response = await fetch('/api/state');
+    if (!response.ok) throw Error();
+    const s = await response.json(), d = s.device, c = s.counters;
+    byId('connection').textContent = s.offline ? '● Offline mode · Local network' : 'Connected';
+    byId('connection').className = 'dot';
+    byId('mode').textContent = s.status + ' · ' + s.scoring;
+    const metrics = [['CPU',d.cpu_percent,'%'],['RAM',d.ram_mb,' MB'],['RAM used',d.ram_percent,'%'],
+      ['CPU temperature',d.temperature_c,' °C'],['Packets / sec',c.packets_per_sec],['Open flows',c.open_flows],
+      ['Skipped',c.packets_skipped],['Dropped',c.packets_dropped]];
+    byId('metrics').replaceChildren(...metrics.map(([label,value,unit]) => {
+      const wrap = node('div'); wrap.append(node('dt',label),node('dd',value == null ? 'N/A' : value + (unit || ''))); return wrap;
+    }));
+    renderAlerts(s.alerts);
+    byId('empty').hidden = s.traffic.length > 0;
+    byId('traffic').replaceChildren(...s.traffic.map(r => {
+      const tr = node('tr'), m = r.metadata, f = r.features;
+      for (const value of [new Date(m.flow_start_ts*1000).toLocaleString(),endpoint(m),m.protocol,
+        f.IN_PKTS+' / '+f.OUT_PKTS,f.IN_BYTES+' / '+f.OUT_BYTES,f.FLOW_DURATION_MILLISECONDS,r.verdict])
+        tr.append(node('td',value,value === 'Flagged' ? 'flag' : ''));
+      return tr;
+    }));
+  } catch { byId('connection').textContent = 'Dashboard disconnected'; byId('connection').className = ''; }
+}
+async function poll() { await refresh(); setTimeout(poll,1500); }
+poll();
+</script></body></html>
