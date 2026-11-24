@@ -8,7 +8,7 @@ Feasible validation points take priority, ranked by attack recall, lower achieve
 
 Selected algorithm: **HistGradientBoostingClassifier**
 
-Train / validation / test flow counts: 69628 / 25403 / 25364.
+Train / validation / test flow counts: 71434 / 25403 / 25364.
 
 PR-AUC uses trapezoidal integration. The confusion matrix gives true class by row and predicted class by column, ordered benign then attack. Latency is the median of 50 warm, single-row predict_proba calls on this host with one worker thread.
 
@@ -16,15 +16,9 @@ PR-AUC uses trapezoidal integration. The confusion matrix gives true class by ro
 
 | Candidate | FPR target | High threshold | Validation FPR | Validation recall | Feasible |
 |---|---:|---:|---:|---:|---|
-| RandomForestClassifier | 1.50% | 0.732142857 | 40.1200% | 82.4300% | No |
-| RandomForestClassifier | 2.00% | 0.732142857 | 40.1200% | 82.4300% | No |
-| RandomForestClassifier | 2.50% | 0.732142857 | 40.1200% | 82.4300% | No |
-| HistGradientBoostingClassifier | 1.50% | 0.992663786 | 1.4961% | 51.6091% | Yes |
-| HistGradientBoostingClassifier | 2.00% | 0.960418918 | 1.7701% | 55.8188% | Yes |
-| HistGradientBoostingClassifier | 2.50% | 0.960418918 | 1.7701% | 55.8188% | Yes |
-| Family-weighted HistGradientBoostingClassifier | 1.50% | 0.992544399 | 1.4739% | 52.0881% | Yes |
-| Family-weighted HistGradientBoostingClassifier | 2.00% | 0.972480731 | 1.7627% | 53.6594% | Yes |
-| Family-weighted HistGradientBoostingClassifier | 2.50% | 0.972480731 | 1.7627% | 53.6594% | Yes |
+| RandomForestClassifier | 2.00% | 0.826000000 | 31.9879% | 76.7835% | No |
+| HistGradientBoostingClassifier | 2.00% | 0.965876221 | 1.9997% | 54.9870% | Yes |
+| Family-weighted HistGradientBoostingClassifier | 2.00% | 0.965667779 | 1.7923% | 53.9955% | Yes |
 
 ## Before and after
 
@@ -32,27 +26,27 @@ Before uses HistGradientBoostingClassifier with the original 3% validation FPR p
 
 | Operating point | Before | After |
 |---|---:|---:|
-| high_threshold | 0.953008027720 | 0.960418917768 |
-| med_threshold | 0.476504013860 | 0.480209458884 |
-| Validation recall | 0.564910512 | 0.558188388 |
-| Validation fpr | 0.026588654 | 0.017701081 |
-| Test accuracy | 0.761591232 | 0.758279451 |
-| Test precision | 0.996217727 | 0.997492058 |
-| Test recall | 0.501407052 | 0.493792418 |
-| Test f1 | 0.667070418 | 0.660576870 |
-| Test fpr | 0.001731667 | 0.001129348 |
-| Test roc_auc | 0.922517275 | 0.922517275 |
-| Test pr_auc | 0.930415056 | 0.930415056 |
+| high_threshold | 0.959174746155 | 0.965876220564 |
+| med_threshold | 0.479587373077 | 0.482938110282 |
+| Validation recall | 0.559196706 | 0.549869759 |
+| Validation fpr | 0.027625537 | 0.019997037 |
+| Test accuracy | 0.754809967 | 0.752326132 |
+| Test precision | 0.995772028 | 0.996575342 |
+| Test recall | 0.487336534 | 0.481708326 |
+| Test f1 | 0.654404001 | 0.649481085 |
+| Test fpr | 0.001882247 | 0.001505797 |
+| Test roc_auc | 0.919956534 | 0.919956534 |
+| Test pr_auc | 0.929681628 | 0.929681628 |
 
 | Test attack family | Recall before | Recall after |
 |---|---:|---:|
-| BruteForce | 0.061777778 | 0.042666667 |
-| DDoS | 0.559633028 | 0.532110092 |
-| DoS | 0.997777778 | 0.997777778 |
+| BruteForce | 0.039111111 | 0.037333333 |
+| DDoS | 0.522935780 | 0.522935780 |
+| DoS | 0.996888889 | 0.996888889 |
 | Mirai | 0.000000000 | 0.000000000 |
-| Recon | 0.766000000 | 0.760444444 |
-| Spoofing | 0.032444444 | 0.028444444 |
-| Web-based | 0.133047210 | 0.115879828 |
+| Recon | 0.748222222 | 0.736000000 |
+| Spoofing | 0.020000000 | 0.020000000 |
+| Web-based | 0.125894134 | 0.113018598 |
 
 ## Baseline test misses
 
@@ -60,104 +54,104 @@ The medium band includes its lower boundary and excludes the high threshold.
 
 | Attack family | Missed | Below medium | Medium band | Min score | Median score | Max score |
 |---|---:|---:|---:|---:|---:|---:|
-| BruteForce | 2111 | 475 | 1636 | 0.083451101 | 0.685984610 | 0.952628678 |
-| DDoS | 48 | 23 | 25 | 0.069583330 | 0.530718133 | 0.946233528 |
-| DoS | 5 | 1 | 4 | 0.270625109 | 0.840647785 | 0.928425044 |
-| Mirai | 24 | 9 | 15 | 0.077675855 | 0.661783973 | 0.952184713 |
-| Recon | 1053 | 377 | 676 | 0.039154077 | 0.687704681 | 0.952978019 |
-| Spoofing | 2177 | 1301 | 876 | 0.028202400 | 0.369935829 | 0.950231153 |
-| Web-based | 606 | 194 | 412 | 0.102654871 | 0.698330355 | 0.952713085 |
+| BruteForce | 2162 | 524 | 1638 | 0.097476465 | 0.633599160 | 0.958409043 |
+| DDoS | 52 | 26 | 26 | 0.060886213 | 0.496908898 | 0.959092556 |
+| DoS | 7 | 2 | 5 | 0.276952805 | 0.875255543 | 0.956450681 |
+| Mirai | 24 | 12 | 12 | 0.138319980 | 0.446448146 | 0.896607771 |
+| Recon | 1133 | 363 | 770 | 0.032043778 | 0.720585757 | 0.959138246 |
+| Spoofing | 2205 | 1309 | 896 | 0.040938904 | 0.386260510 | 0.956498663 |
+| Web-based | 611 | 182 | 429 | 0.133070093 | 0.711655609 | 0.958711317 |
 
 ## RandomForestClassifier
 
-High threshold: 0.73214285714285721 (validation best F1 because no interior cutoff met FPR <= 1.50%). Medium threshold: 0.3660714285714286 (heuristic, half of high).
+High threshold: 0.82599999999999996 (validation best F1 because no interior cutoff met FPR <= 2.00%). Medium threshold: 0.41299999999999998 (heuristic, half of high).
 
-Validation F1: 0.7232. Validation FPR: 0.4012.
+Validation F1: 0.7207. Validation FPR: 0.3199.
 
 | Test metric | Value |
 |---|---:|
-| accuracy | 0.80898 |
-| precision | 0.81594 |
-| recall | 0.77346 |
-| f1 | 0.79414 |
-| fpr | 0.15871 |
-| roc_auc | 0.87721 |
-| pr_auc | 0.89705 |
-| average_precision | 0.89187 |
+| accuracy | 0.79388 |
+| precision | 0.86280 |
+| recall | 0.67456 |
+| f1 | 0.75715 |
+| fpr | 0.09758 |
+| roc_auc | 0.87435 |
+| pr_auc | 0.89356 |
+| average_precision | 0.88818 |
 
-Confusion matrix: `[[11174, 2108], [2737, 9345]]`
+Confusion matrix: `[[11986, 1296], [3932, 8150]]`
 
-Serialized bundle: 78823.67 KiB. Warm inference: 5.2883 ms.
+Serialized bundle: 81402.00 KiB. Warm inference: 19.7869 ms.
 
 | Test attack family | Recall |
 |---|---:|
-| BruteForce | 0.64089 |
-| DDoS | 0.77982 |
-| DoS | 1.00000 |
-| Mirai | 0.37500 |
-| Recon | 0.92067 |
-| Spoofing | 0.39689 |
-| Web-based | 0.74821 |
+| BruteForce | 0.28889 |
+| DDoS | 0.70642 |
+| DoS | 0.99956 |
+| Mirai | 0.20833 |
+| Recon | 0.89800 |
+| Spoofing | 0.30044 |
+| Web-based | 0.64664 |
 
 ## HistGradientBoostingClassifier
 
-High threshold: 0.9604189177676925 (maximize validation recall subject to FPR <= 2.00%). Medium threshold: 0.48020945888384625 (heuristic, half of high).
+High threshold: 0.96587622056363209 (maximize validation recall subject to FPR <= 2.00%). Medium threshold: 0.48293811028181605 (heuristic, half of high).
 
-Validation F1: 0.7073. Validation FPR: 0.0177.
+Validation F1: 0.6993. Validation FPR: 0.0200.
 
 | Test metric | Value |
 |---|---:|
-| accuracy | 0.75828 |
-| precision | 0.99749 |
-| recall | 0.49379 |
-| f1 | 0.66058 |
-| fpr | 0.00113 |
-| roc_auc | 0.92252 |
-| pr_auc | 0.93042 |
-| average_precision | 0.93019 |
+| accuracy | 0.75233 |
+| precision | 0.99658 |
+| recall | 0.48171 |
+| f1 | 0.64948 |
+| fpr | 0.00151 |
+| roc_auc | 0.91996 |
+| pr_auc | 0.92968 |
+| average_precision | 0.92946 |
 
-Confusion matrix: `[[13267, 15], [6116, 5966]]`
+Confusion matrix: `[[13262, 20], [6262, 5820]]`
 
-Serialized bundle: 712.79 KiB. Warm inference: 1.6791 ms.
+Serialized bundle: 712.57 KiB. Warm inference: 6.5555 ms.
 
 | Test attack family | Recall |
 |---|---:|
-| BruteForce | 0.04267 |
-| DDoS | 0.53211 |
-| DoS | 0.99778 |
+| BruteForce | 0.03733 |
+| DDoS | 0.52294 |
+| DoS | 0.99689 |
 | Mirai | 0.00000 |
-| Recon | 0.76044 |
-| Spoofing | 0.02844 |
-| Web-based | 0.11588 |
+| Recon | 0.73600 |
+| Spoofing | 0.02000 |
+| Web-based | 0.11302 |
 
 ## Family-weighted HistGradientBoostingClassifier
 
-High threshold: 0.97248073078094188 (maximize validation recall subject to FPR <= 2.00%). Medium threshold: 0.48624036539047094 (heuristic, half of high).
+High threshold: 0.96566777881847221 (maximize validation recall subject to FPR <= 2.00%). Medium threshold: 0.48283388940923611 (heuristic, half of high).
 
-Validation F1: 0.6894. Validation FPR: 0.0176.
+Validation F1: 0.6921. Validation FPR: 0.0179.
 
 | Test metric | Value |
 |---|---:|
-| accuracy | 0.74239 |
-| precision | 0.99695 |
-| recall | 0.46060 |
-| f1 | 0.63010 |
-| fpr | 0.00128 |
-| roc_auc | 0.92205 |
-| pr_auc | 0.93083 |
-| average_precision | 0.93061 |
+| accuracy | 0.74819 |
+| precision | 0.99530 |
+| recall | 0.47360 |
+| f1 | 0.64180 |
+| fpr | 0.00203 |
+| roc_auc | 0.92159 |
+| pr_auc | 0.92978 |
+| average_precision | 0.92956 |
 
-Confusion matrix: `[[13265, 17], [6517, 5565]]`
+Confusion matrix: `[[13255, 27], [6360, 5722]]`
 
-Serialized bundle: 714.37 KiB. Warm inference: 1.7119 ms.
+Serialized bundle: 711.06 KiB. Warm inference: 5.6319 ms.
 
 | Test attack family | Recall |
 |---|---:|
-| BruteForce | 0.03022 |
-| DDoS | 0.56881 |
-| DoS | 0.99733 |
-| Mirai | 0.08333 |
-| Recon | 0.68889 |
-| Spoofing | 0.01111 |
-| Web-based | 0.09156 |
+| BruteForce | 0.03156 |
+| DDoS | 0.53211 |
+| DoS | 0.99644 |
+| Mirai | 0.00000 |
+| Recon | 0.72267 |
+| Spoofing | 0.01022 |
+| Web-based | 0.10873 |
 

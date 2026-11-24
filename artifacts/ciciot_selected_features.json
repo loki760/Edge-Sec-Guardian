@@ -1,18 +1,27 @@
 {
   "schema_version": 1,
   "split_version": 1,
-  "input_sha256": "3d68bb16c1a1ed946be92adb4f3f62ff64b4db374e89a0668410c94e9786b9af",
+  "input_sha256": "b29c41f1ba9efdb5703c9c7af9df3afac2a58f6cf05fffaac0a6ea0238722191",
   "split_hashes": {
-    "train": "6333e393e534f5f4baa8d70ed1e113685696b49ea18820f862590086e8800084",
-    "val": "9139a17cd5bb497ecb1266f168d306bbfa07611d75dd24208f3aeef10816f058",
-    "test": "6aea2b03d48897182fdc8493ad2e03c366f18b7e37ced83a30b461730becc605"
+    "train": "d3bf1faae972e5514987133c598821d9c143029c5cddfa8019145e83d37d0654",
+    "val": "9faa598b9807c7adbc58f2c065f6251566215192abb56edb95cd995828c15291",
+    "test": "9a71f04ae3f7de7bb59fe7df60bd94cc1920eb275b664a1764e847ffce8cdc2d"
   },
   "split_counts": {
-    "train": 69628,
+    "train": 71434,
     "val": 25403,
     "test": 25364
   },
   "split_audit": [
+    {
+      "source_pcap": "BenignTraffic4.pcap",
+      "attack_family": "Benign",
+      "method": "whole capture pinned to train",
+      "train": 1806,
+      "val": 0,
+      "test": 0,
+      "embargo": 0
+    },
     {
       "source_pcap": "BenignTraffic2.pcap",
       "attack_family": "Benign",
@@ -122,6 +131,9 @@
       "embargo": 76
     }
   ],
+  "train_captures": [
+    "BenignTraffic4.pcap"
+  ],
   "candidates": {
     "A: all features": [
       "PROTOCOL_NUM",
@@ -211,7 +223,6 @@
       "IN_PKTS",
       "OUT_PKTS",
       "IN_BYTES",
-      "OUT_BYTES",
       "FLOW_DURATION_MILLISECONDS",
       "PKTS_PER_SEC",
       "BYTES_PER_SEC",
@@ -242,30 +253,30 @@
     {
       "subset": "A: all features",
       "features": 29,
-      "f1": 0.7149998299724556,
-      "precision": 0.6005369587569976,
-      "recall": 0.8833711452819091
+      "f1": 0.7130446632371478,
+      "precision": 0.5996447398578959,
+      "recall": 0.8793378707671624
     },
     {
       "subset": "B: volume and timing",
       "features": 21,
-      "f1": 0.6941207803448964,
-      "precision": 0.5747918619396813,
-      "recall": 0.8759768086715402
+      "f1": 0.6939074302066349,
+      "precision": 0.5744270603790216,
+      "recall": 0.8761448617763213
     },
     {
       "subset": "C: volume, timing and flags",
       "features": 27,
-      "f1": 0.7028888200254795,
-      "precision": 0.5954381052385953,
-      "recall": 0.8576590202503991
+      "f1": 0.7001462038012989,
+      "precision": 0.5880068532267276,
+      "recall": 0.8651373834131586
     },
     {
       "subset": "D: training EDA",
-      "features": 29,
-      "f1": 0.7149998299724556,
-      "precision": 0.6005369587569976,
-      "recall": 0.8833711452819091
+      "features": 28,
+      "f1": 0.7155381204161692,
+      "precision": 0.602274032387734,
+      "recall": 0.8812704814721452
     }
   ],
   "selected_subset": "A: all features",
@@ -301,34 +312,34 @@
     "DST_TO_SRC_IAT_STDDEV"
   ],
   "permutation_importance": {
-    "PROTOCOL_NUM": 0.004631613328262156,
-    "IN_PKTS": 0.001638440592082772,
-    "OUT_PKTS": 0.0006751706846722291,
-    "IN_BYTES": 0.02029247148604803,
-    "OUT_BYTES": 0.007216148296586604,
-    "FLOW_DURATION_MILLISECONDS": 0.011440293528925763,
-    "PKTS_PER_SEC": 0.015059756961103657,
-    "BYTES_PER_SEC": 0.008917049009236363,
-    "IN_OUT_PKT_RATIO": 0.003699703803620169,
-    "IN_OUT_BYTE_RATIO": 0.009543618279358013,
-    "PKT_LEN_MIN": 0.00972479029052801,
-    "PKT_LEN_MAX": 0.014200413184758842,
-    "PKT_LEN_MEAN": 0.01793699647622597,
-    "PKT_LEN_STD": 0.010841429477213374,
-    "TTL_MEAN": 0.023109783057916073,
-    "SYN_RATIO": 0.01767870811748895,
-    "ACK_RATIO": 0.005962657830995033,
-    "FIN_RATIO": 0.0031660480042859187,
-    "RST_RATIO": 0.008445410584315027,
-    "PSH_RATIO": 0.0018096028901087118,
+    "PROTOCOL_NUM": 0.0041250342439001315,
+    "IN_PKTS": 0.0065331191993071025,
+    "OUT_PKTS": 0.00026578825227119296,
+    "IN_BYTES": 0.009265072295502478,
+    "OUT_BYTES": 0.003895347636997134,
+    "FLOW_DURATION_MILLISECONDS": 0.008502733255195608,
+    "PKTS_PER_SEC": 0.0003774156378573146,
+    "BYTES_PER_SEC": 0.003499896102588903,
+    "IN_OUT_PKT_RATIO": 0.002351843532673925,
+    "IN_OUT_BYTE_RATIO": 0.010861040119699386,
+    "PKT_LEN_MIN": 0.0102073039408039,
+    "PKT_LEN_MAX": 0.011131739980271579,
+    "PKT_LEN_MEAN": 0.019436033639523804,
+    "PKT_LEN_STD": 0.008362225935079848,
+    "TTL_MEAN": 0.018059395766603464,
+    "SYN_RATIO": 0.09668769510197428,
+    "ACK_RATIO": 0.006141480533091419,
+    "FIN_RATIO": 0.0015412678587231425,
+    "RST_RATIO": 0.0010089760859873047,
+    "PSH_RATIO": -0.0004911701991882067,
     "URG_RATIO": 0.0,
-    "SRC_TO_DST_IAT_MIN": 0.005081442487157806,
-    "SRC_TO_DST_IAT_MAX": 0.006311912028321857,
-    "SRC_TO_DST_IAT_AVG": 0.010160412799342136,
-    "SRC_TO_DST_IAT_STDDEV": 0.004701423711608792,
-    "DST_TO_SRC_IAT_MIN": 0.0012346800022985382,
-    "DST_TO_SRC_IAT_MAX": 0.0018791065564990699,
-    "DST_TO_SRC_IAT_AVG": 0.0009113457732291182,
-    "DST_TO_SRC_IAT_STDDEV": 0.0014070833258641076
+    "SRC_TO_DST_IAT_MIN": 0.004512748669636986,
+    "SRC_TO_DST_IAT_MAX": 0.0011901765015352266,
+    "SRC_TO_DST_IAT_AVG": 0.004274769468324169,
+    "SRC_TO_DST_IAT_STDDEV": 0.0042287839878944284,
+    "DST_TO_SRC_IAT_MIN": 0.0008829702104001802,
+    "DST_TO_SRC_IAT_MAX": 0.0008462285681834306,
+    "DST_TO_SRC_IAT_AVG": 0.001849455875895023,
+    "DST_TO_SRC_IAT_STDDEV": 0.0007639089922009124
   }
 }

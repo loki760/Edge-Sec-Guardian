@@ -6,6 +6,22 @@ import numpy as np
 import pandas as pd
 
 from train_ciciot_model import DEFAULT_TARGET_FPRS, recall_rank, validation_point
+from select_ciciot_features import make_splits
+
+
+class CaptureSplitTests(unittest.TestCase):
+    def test_small_capture_can_be_pinned_wholly_to_training(self):
+        frame = pd.DataFrame({"source_pcap": ["a.pcap"] * 20 + ["b.pcap"] * 19
+                                           + ["c.pcap"] * 18 + ["pi.pcap"] * 3,
+                              "label": 0, "attack_family": "Benign"})
+        default, _ = make_splits(frame)
+        self.assertTrue(set(frame.index[-3:]) <= set(default["test"]))
+        pinned, _ = make_splits(frame, ["pi.pcap"])
+        self.assertTrue(set(frame.index[-3:]) <= set(pinned["train"]))
+        captures = {key: set(frame.iloc[indices]["source_pcap"]) for key, indices in pinned.items()}
+        self.assertTrue(captures["val"] and captures["test"])
+        self.assertTrue(captures["train"].isdisjoint(captures["val"] | captures["test"]))
+        self.assertTrue(captures["val"].isdisjoint(captures["test"]))
 
 
 class ThresholdTests(unittest.TestCase):

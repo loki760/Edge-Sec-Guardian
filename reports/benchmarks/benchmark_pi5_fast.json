@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "run": {
+    "utc": "2026-11-24T17:40:57.861226+00:00",
+    "pcap": "data/Recon-PortScan.pcap",
+    "pcap_sha256": "e13368bdc571a6ec53f8dd9e5491137dd0656c9d997bd62b323e957722bd4fc1",
+    "interface": null,
+    "requested_duration_sec": 30.0,
+    "explain_min_level": "high",
+    "explanation_cooldown_sec": 30.0,
+    "detector_threads": 1,
+    "capture_elapsed_sec": 30.551480945000094,
+    "explanation_drain_sec": 2.3443999907613033e-05
+  },
+  "environment": {
+    "os": "Linux-6.18.34+rpt-rpi-2712-aarch64-with-glibc2.41",
+    "architecture": "aarch64",
+    "cpu_model": "Raspberry Pi 5 Model B Rev 1.0",
+    "logical_cores": 4,
+    "physical_cores": 4,
+    "python": "3.13.5",
+    "scikit_learn": "1.9.1",
+    "executorch": "not installed"
+  },
+  "artifacts": {
+    "detector": {
+      "path": "artifacts/ciciot_model.pkl",
+      "size_mb": 0.729892
+    },
+    "llama_model": null,
+    "llama_tokenizer": null
+  },
+  "detector": {
+    "total_packets": 23183,
+    "total_flows": 7373,
+    "alert_count": 5300,
+    "packet_drop_count": null,
+    "packets_skipped": 1101,
+    "packets_per_sec": 758.8175526330424,
+    "flows_per_sec": 241.33036343714883,
+    "replay_passes": 1,
+    "extraction_ms": {
+      "p50": 0.07081500007188879,
+      "p95": 0.23270699994100139,
+      "max": 5.341443999896001,
+      "count": 7373,
+      "sampled": 7373
+    },
+    "detector_ms": {
+      "p50": 3.770166999856883,
+      "p95": 3.8618955998572346,
+      "max": 16.582223000114027,
+      "count": 7373,
+      "sampled": 7373
+    },
+    "combined_ms": {
+      "p50": 3.850001000046177,
+      "p95": 4.0590814001461695,
+      "max": 16.928260000213413,
+      "count": 7373,
+      "sampled": 7373
+    },
+    "emit_delay_ms": {
+      "p50": 15000.036,
+      "p95": 255250.7822,
+      "max": 255655.961,
+      "count": 7373,
+      "sampled": 7373
+    }
+  },
+  "explainer": {
+    "mode": "none",
+    "invocation_count": 0,
+    "skipped_count": 0,
+    "error_count": 0,
+    "reused_count": 0,
+    "last_latency_ms": null,
+    "avg_latency_ms": null,
+    "ttft_ms": {
+      "p50": null,
+      "p95": null,
+      "max": null,
+      "count": 0,
+      "sampled": 0
+    },
+    "tokens_per_sec": {
+      "p50": null,
+      "p95": null,
+      "max": null,
+      "count": 0,
+      "sampled": 0
+    },
+    "total_latency_ms": {
+      "p50": null,
+      "p95": null,
+      "max": null,
+      "count": 0,
+      "sampled": 0
+    },
+    "invocation_rate_percent": 0.0
+  },
+  "system_health": {
+    "start_ram_mb": 220.184576,
+    "peak_ram_mb": 226.164736,
+    "end_ram_mb": 226.148352,
+    "ram_delta_mb": 5.963775999999996,
+    "cpu_avg_percent": 25.037190082644628,
+    "cpu_peak_percent": 25.7,
+    "cpu_samples": 121,
+    "process_cpu_percent": 100.06053911704151,
+    "start_temperature_c": 47.95,
+    "peak_temperature_c": 52.35,
+    "end_temperature_c": 50.7,
+    "start_throttling": "throttled=0x0",
+    "end_throttling": "throttled=0x0"
+  }
+}

@@ -47,19 +47,31 @@ def chronological_positions(capture):
     return parts
 
 
-def make_splits(frame):
+def make_splits(frame, train_captures=()):
     grouped = frame.groupby("source_pcap")[["attack_family", "label"]].nunique()
     if (grouped > 1).any().any():
         raise ValueError("One source_pcap has multiple families or labels")
+    if not isinstance(train_captures, (list, tuple)) or any(not isinstance(name, str) for name in train_captures):
+        raise ValueError("Training capture pins must be a list of source_pcap names")
+    pins = set(train_captures)
+    if unknown := pins.difference(grouped.index):
+        raise ValueError(f"Unknown training capture(s): {', '.join(sorted(unknown))}")
     positions = {part: [] for part in PARTITIONS}
     audit = []
     for family, family_rows in frame.groupby("attack_family", sort=True):
         captures = list(family_rows.groupby("source_pcap", sort=True))
         captures.sort(key=lambda item: (-len(item[1]), item[0]))
+        reserved = [(source, capture) for source, capture in captures if source in pins]
+        unpinned = [(source, capture) for source, capture in captures if source not in pins]
+        if reserved and len(unpinned) < 2:
+            raise ValueError(f"Pinning {family} requires two unpinned captures for validation and test")
         counts = np.zeros(3, dtype=int)
         targets = np.array([.70, .15, .15]) * len(family_rows)
-        for sequence, (source, capture) in enumerate(captures):
-            if len(captures) < 3:
+        for sequence, (source, capture) in enumerate(reserved + unpinned):
+            if source in pins:
+                method = "whole capture pinned to train"
+                parts = [capture.index.tolist(), [], []]
+            elif len(captures) < 3:
                 method = "chronological with embargo"
                 parts = chronological_positions(capture)
             else:
@@ -90,7 +102,7 @@ def load_selection_splits(input_path, selection):
     if selection.get("input_sha256") != file_digest(input_path):
         raise ValueError("Feature selection input SHA256 does not match this CSV")
     frame = read_flows(input_path)
-    splits, _ = make_splits(frame)
+    splits, _ = make_splits(frame, selection.get("train_captures", ()))
     if selection.get("split_hashes") != split_hashes(splits):
         raise ValueError("Partition membership differs from feature selection")
     return frame, splits
@@ -113,9 +125,9 @@ def candidate_subsets(train):
 
 
 def select_features(input_path, output_path="artifacts/ciciot_selected_features.json",
-                    report_path="reports/FEATURE_SELECTION.md"):
+                    report_path="reports/FEATURE_SELECTION.md", *, train_captures=(), all_features=False):
     frame = read_flows(input_path)
-    splits, audit = make_splits(frame)
+    splits, audit = make_splits(frame, train_captures)
     train, val = (frame.iloc[splits[name]] for name in ("train", "val"))
     for name, part in [("training", train), ("validation", val)]:
         if part.label.nunique() != 2:
@@ -134,7 +146,7 @@ def select_features(input_path, output_path="artifacts/ciciot_selected_features.
                            precision=float(precision_score(val.label, predicted, zero_division=0)),
                            recall=float(recall_score(val.label, predicted, zero_division=0))))
         key = (f1, -len(columns))
-        if best_key is None or key > best_key:
+        if (not all_features or name == "A: all features") and (best_key is None or key > best_key):
             best_key, winner, best_model = key, name, forest
     selected = candidates[winner]
     sample = val.sample(n=min(5000, len(val)), random_state=42)
@@ -143,20 +155,24 @@ def select_features(input_path, output_path="artifacts/ciciot_selected_features.
     importance = dict(zip(selected, perm.importances_mean.tolist()))
     result = dict(schema_version=1, split_version=SPLIT_VERSION, input_sha256=file_digest(input_path),
                   split_hashes=split_hashes(splits), split_counts={k: len(v) for k, v in splits.items()},
-                  split_audit=audit, candidates=candidates, validation_scores=scores,
+                  split_audit=audit, train_captures=sorted(set(train_captures)),
+                  candidates=candidates, validation_scores=scores,
                   selected_subset=winner, feature_columns=selected, permutation_importance=importance)
     report = [
         "# Flow feature selection", f"Input `{Path(input_path).name}`, SHA256 `{result['input_sha256']}`.",
         "## Split membership", "Targets are 70% training, 15% validation and 15% test. "
         "Within each family, whole captures are assigned largest first to the partition "
-        "furthest below target, reserving one file per partition. Families with fewer than "
+        "furthest below target, reserving one file per partition. Explicit training captures "
+        "are assigned first as whole files. Families with fewer than "
         "three captures use chronological blocks in each file. One flow immediately before "
         "each boundary and earlier flows ending at or after the next block are withheld. "
         "These blocks still share capture conditions, limiting generalization claims.",
         table(pd.DataFrame(audit)),
         "## Validation comparison", "Each subset uses a 50-tree random forest with balanced "
-        "training class weights and seed 42. The highest validation attack F1 wins. "
-        "Ties favor fewer features, then the first listed subset. D removes training constants "
+        "training class weights and seed 42. "
+        + ("The run requires the full 29-feature contract. " if all_features else
+           "The highest validation attack F1 wins. Ties favor fewer features, then the first listed subset. ")
+        + "D removes training constants "
         "and later contract-order features with absolute Pearson correlation ≥0.98 to an "
         "already retained feature. Validation and test retain their original class mix.",
         table(pd.DataFrame(scores)), f"Selected **{winner}**. Ordered inputs: " + ", ".join(selected) + ".",
@@ -176,8 +192,12 @@ if __name__ == "__main__":
     parser.add_argument("--input", default="data/processed/ciciot_flows.csv")
     parser.add_argument("--output", default="artifacts/ciciot_selected_features.json")
     parser.add_argument("--report", default="reports/FEATURE_SELECTION.md")
+    parser.add_argument("--train-capture", action="append", default=[],
+                        help="Keep this exact source_pcap wholly in training (repeatable)")
+    parser.add_argument("--all-features", action="store_true", help="Select all 29 features")
     args = parser.parse_args()
     try:
-        select_features(args.input, args.output, args.report)
+        select_features(args.input, args.output, args.report,
+                        train_captures=args.train_capture, all_features=args.all_features)
     except (OSError, ValueError) as error:
         parser.exit(1, f"Feature selection failed: {error}\n")

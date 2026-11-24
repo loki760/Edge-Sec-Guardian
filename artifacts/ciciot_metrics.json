@@ -32,676 +32,460 @@
     "DST_TO_SRC_IAT_AVG",
     "DST_TO_SRC_IAT_STDDEV"
   ],
-  "input_sha256": "3d68bb16c1a1ed946be92adb4f3f62ff64b4db374e89a0668410c94e9786b9af",
+  "input_sha256": "b29c41f1ba9efdb5703c9c7af9df3afac2a58f6cf05fffaac0a6ea0238722191",
   "split_hashes": {
-    "train": "6333e393e534f5f4baa8d70ed1e113685696b49ea18820f862590086e8800084",
-    "val": "9139a17cd5bb497ecb1266f168d306bbfa07611d75dd24208f3aeef10816f058",
-    "test": "6aea2b03d48897182fdc8493ad2e03c366f18b7e37ced83a30b461730becc605"
+    "train": "d3bf1faae972e5514987133c598821d9c143029c5cddfa8019145e83d37d0654",
+    "val": "9faa598b9807c7adbc58f2c065f6251566215192abb56edb95cd995828c15291",
+    "test": "9a71f04ae3f7de7bb59fe7df60bd94cc1920eb275b664a1764e847ffce8cdc2d"
   },
   "split_rows": {
-    "train": 69628,
+    "train": 71434,
     "val": 25403,
     "test": 25364
   },
   "models": {
     "RandomForestClassifier": {
-      "target_fpr": 0.015,
-      "high_threshold": 0.7321428571428572,
-      "med_threshold": 0.3660714285714286,
-      "threshold_method": "validation best F1 because no interior cutoff met FPR <= 1.50%",
+      "target_fpr": 0.02,
+      "high_threshold": 0.826,
+      "med_threshold": 0.413,
+      "threshold_method": "validation best F1 because no interior cutoff met FPR <= 2.00%",
       "validation": {
         "rows": 25403,
-        "accuracy": 0.7044443569657127,
-        "precision": 0.6442503447822946,
-        "recall": 0.8243004789513486,
-        "f1": 0.7232379828959009,
-        "fpr": 0.40119982224855577,
-        "roc_auc": 0.8094632486890594,
-        "pr_auc": 0.823305823991218,
-        "average_precision": 0.7754347753983968,
+        "accuracy": 0.7212140298389954,
+        "precision": 0.6790517946050383,
+        "recall": 0.7678346357448954,
+        "f1": 0.7207192996293083,
+        "fpr": 0.31987853651310916,
+        "roc_auc": 0.8014250404179417,
+        "pr_auc": 0.8137921752479618,
+        "average_precision": 0.7590715333824174,
         "confusion_matrix": [
           [
-            8085,
-            5417
+            9183,
+            4319
           ],
           [
-            2091,
-            9810
+            2763,
+            9138
           ]
         ],
         "per_family_recall": {
-          "BruteForce": 0.6088527551942186,
-          "DDoS": 0.8023255813953488,
-          "DoS": 0.999546485260771,
-          "Mirai": 0.46153846153846156,
-          "Recon": 0.9658938921087828,
-          "Spoofing": 0.6076854334226989,
-          "Web-based": 0.7435508345978755
+          "BruteForce": 0.5031616982836495,
+          "DDoS": 0.7209302325581395,
+          "DoS": 0.999092970521542,
+          "Mirai": 0.38461538461538464,
+          "Recon": 0.9509585376727597,
+          "Spoofing": 0.4785522788203753,
+          "Web-based": 0.6327769347496206
         }
       },
       "validation_grid": [
         {
-          "target_fpr": 0.015,
-          "high_threshold": 0.7321428571428572,
-          "med_threshold": 0.3660714285714286,
-          "threshold_method": "validation best F1 because no interior cutoff met FPR <= 1.50%",
-          "validation": {
-            "rows": 25403,
-            "accuracy": 0.7044443569657127,
-            "precision": 0.6442503447822946,
-            "recall": 0.8243004789513486,
-            "f1": 0.7232379828959009,
-            "fpr": 0.40119982224855577,
-            "roc_auc": 0.8094632486890594,
-            "pr_auc": 0.823305823991218,
-            "average_precision": 0.7754347753983968,
-            "confusion_matrix": [
-              [
-                8085,
-                5417
-              ],
-              [
-                2091,
-                9810
-              ]
-            ],
-            "per_family_recall": {
-              "BruteForce": 0.6088527551942186,
-              "DDoS": 0.8023255813953488,
-              "DoS": 0.999546485260771,
-              "Mirai": 0.46153846153846156,
-              "Recon": 0.9658938921087828,
-              "Spoofing": 0.6076854334226989,
-              "Web-based": 0.7435508345978755
-            }
-          }
-        },
-        {
           "target_fpr": 0.02,
-          "high_threshold": 0.7321428571428572,
-          "med_threshold": 0.3660714285714286,
+          "high_threshold": 0.826,
+          "med_threshold": 0.413,
           "threshold_method": "validation best F1 because no interior cutoff met FPR <= 2.00%",
           "validation": {
             "rows": 25403,
-            "accuracy": 0.7044443569657127,
-            "precision": 0.6442503447822946,
-            "recall": 0.8243004789513486,
-            "f1": 0.7232379828959009,
-            "fpr": 0.40119982224855577,
-            "roc_auc": 0.8094632486890594,
-            "pr_auc": 0.823305823991218,
-            "average_precision": 0.7754347753983968,
+            "accuracy": 0.7212140298389954,
+            "precision": 0.6790517946050383,
+            "recall": 0.7678346357448954,
+            "f1": 0.7207192996293083,
+            "fpr": 0.31987853651310916,
+            "roc_auc": 0.8014250404179417,
+            "pr_auc": 0.8137921752479618,
+            "average_precision": 0.7590715333824174,
             "confusion_matrix": [
               [
-                8085,
-                5417
+                9183,
+                4319
               ],
               [
-                2091,
-                9810
+                2763,
+                9138
               ]
             ],
             "per_family_recall": {
-              "BruteForce": 0.6088527551942186,
-              "DDoS": 0.8023255813953488,
-              "DoS": 0.999546485260771,
-              "Mirai": 0.46153846153846156,
-              "Recon": 0.9658938921087828,
-              "Spoofing": 0.6076854334226989,
-              "Web-based": 0.7435508345978755
-            }
-          }
-        },
-        {
-          "target_fpr": 0.025,
-          "high_threshold": 0.7321428571428572,
-          "med_threshold": 0.3660714285714286,
-          "threshold_method": "validation best F1 because no interior cutoff met FPR <= 2.50%",
-          "validation": {
-            "rows": 25403,
-            "accuracy": 0.7044443569657127,
-            "precision": 0.6442503447822946,
-            "recall": 0.8243004789513486,
-            "f1": 0.7232379828959009,
-            "fpr": 0.40119982224855577,
-            "roc_auc": 0.8094632486890594,
-            "pr_auc": 0.823305823991218,
-            "average_precision": 0.7754347753983968,
-            "confusion_matrix": [
-              [
-                8085,
-                5417
-              ],
-              [
-                2091,
-                9810
-              ]
-            ],
-            "per_family_recall": {
-              "BruteForce": 0.6088527551942186,
-              "DDoS": 0.8023255813953488,
-              "DoS": 0.999546485260771,
-              "Mirai": 0.46153846153846156,
-              "Recon": 0.9658938921087828,
-              "Spoofing": 0.6076854334226989,
-              "Web-based": 0.7435508345978755
+              "BruteForce": 0.5031616982836495,
+              "DDoS": 0.7209302325581395,
+              "DoS": 0.999092970521542,
+              "Mirai": 0.38461538461538464,
+              "Recon": 0.9509585376727597,
+              "Spoofing": 0.4785522788203753,
+              "Web-based": 0.6327769347496206
             }
           }
         }
       ],
       "test": {
         "rows": 25364,
-        "accuracy": 0.8089812332439679,
-        "precision": 0.8159434209377455,
-        "recall": 0.7734646581691773,
-        "f1": 0.794136392606756,
-        "fpr": 0.15871103749435325,
-        "roc_auc": 0.8772055437769131,
-        "pr_auc": 0.897054981216556,
-        "average_precision": 0.891869018436754,
+        "accuracy": 0.7938810913105189,
+        "precision": 0.862799068388736,
+        "recall": 0.6745571925177951,
+        "f1": 0.7571534745447789,
+        "fpr": 0.09757566631531396,
+        "roc_auc": 0.8743494050754568,
+        "pr_auc": 0.8935622659167411,
+        "average_precision": 0.8881793484174678,
         "confusion_matrix": [
           [
-            11174,
-            2108
+            11986,
+            1296
           ],
           [
-            2737,
-            9345
+            3932,
+            8150
           ]
         ],
         "per_family_recall": {
-          "BruteForce": 0.6408888888888888,
-          "DDoS": 0.7798165137614679,
-          "DoS": 1.0,
-          "Mirai": 0.375,
-          "Recon": 0.9206666666666666,
-          "Spoofing": 0.3968888888888889,
-          "Web-based": 0.748211731044349
+          "BruteForce": 0.28888888888888886,
+          "DDoS": 0.7064220183486238,
+          "DoS": 0.9995555555555555,
+          "Mirai": 0.20833333333333334,
+          "Recon": 0.898,
+          "Spoofing": 0.30044444444444446,
+          "Web-based": 0.6466380543633763
         }
       },
-      "serialized_size_kb": 78823.669921875,
-      "warm_single_row_ms": 5.2883
+      "serialized_size_kb": 81401.998046875,
+      "warm_single_row_ms": 19.786949999999997
     },
     "HistGradientBoostingClassifier": {
       "target_fpr": 0.02,
-      "high_threshold": 0.9604189177676925,
-      "med_threshold": 0.48020945888384625,
+      "high_threshold": 0.9658762205636321,
+      "med_threshold": 0.48293811028181605,
       "threshold_method": "maximize validation recall subject to FPR <= 2.00%",
       "validation": {
         "rows": 25403,
-        "accuracy": 0.7836082352478054,
-        "precision": 0.9652717233362395,
-        "recall": 0.5581883875304596,
-        "f1": 0.7073417451951233,
-        "fpr": 0.017701081321285735,
-        "roc_auc": 0.8405599311139096,
-        "pr_auc": 0.8657352817300581,
-        "average_precision": 0.865591260082923,
+        "accuracy": 0.7784907294414045,
+        "precision": 0.9603756970942178,
+        "recall": 0.5498697588437946,
+        "f1": 0.6993320865615816,
+        "fpr": 0.019997037475929492,
+        "roc_auc": 0.83532462633544,
+        "pr_auc": 0.8618488483890373,
+        "average_precision": 0.8617026615035903,
         "confusion_matrix": [
           [
-            13263,
-            239
+            13232,
+            270
           ],
           [
-            5258,
-            6643
+            5357,
+            6544
           ]
         ],
         "per_family_recall": {
-          "BruteForce": 0.13369467028003612,
-          "DDoS": 0.5116279069767442,
+          "BruteForce": 0.13866305329719963,
+          "DDoS": 0.4883720930232558,
           "DoS": 0.9972789115646259,
           "Mirai": 0.0,
-          "Recon": 0.8689255461435578,
-          "Spoofing": 0.05227882037533512,
-          "Web-based": 0.13505311077389984
+          "Recon": 0.8584485064645564,
+          "Spoofing": 0.02993744414655943,
+          "Web-based": 0.11836115326251896
         }
       },
       "validation_grid": [
         {
-          "target_fpr": 0.015,
-          "high_threshold": 0.9926637864963623,
-          "med_threshold": 0.49633189324818117,
-          "threshold_method": "maximize validation recall subject to FPR <= 1.50%",
-          "validation": {
-            "rows": 25403,
-            "accuracy": 0.7653426760618824,
-            "precision": 0.9681588902900379,
-            "recall": 0.5160910847827913,
-            "f1": 0.6732803507810359,
-            "fpr": 0.014960746556065769,
-            "roc_auc": 0.8405599311139096,
-            "pr_auc": 0.8657352817300581,
-            "average_precision": 0.865591260082923,
-            "confusion_matrix": [
-              [
-                13300,
-                202
-              ],
-              [
-                5759,
-                6142
-              ]
-            ],
-            "per_family_recall": {
-              "BruteForce": 0.09439927732610659,
-              "DDoS": 0.13953488372093023,
-              "DoS": 0.9972789115646259,
-              "Mirai": 0.0,
-              "Recon": 0.8207757467677218,
-              "Spoofing": 0.009830205540661306,
-              "Web-based": 0.027314112291350532
-            }
-          }
-        },
-        {
           "target_fpr": 0.02,
-          "high_threshold": 0.9604189177676925,
-          "med_threshold": 0.48020945888384625,
+          "high_threshold": 0.9658762205636321,
+          "med_threshold": 0.48293811028181605,
           "threshold_method": "maximize validation recall subject to FPR <= 2.00%",
           "validation": {
             "rows": 25403,
-            "accuracy": 0.7836082352478054,
-            "precision": 0.9652717233362395,
-            "recall": 0.5581883875304596,
-            "f1": 0.7073417451951233,
-            "fpr": 0.017701081321285735,
-            "roc_auc": 0.8405599311139096,
-            "pr_auc": 0.8657352817300581,
-            "average_precision": 0.865591260082923,
+            "accuracy": 0.7784907294414045,
+            "precision": 0.9603756970942178,
+            "recall": 0.5498697588437946,
+            "f1": 0.6993320865615816,
+            "fpr": 0.019997037475929492,
+            "roc_auc": 0.83532462633544,
+            "pr_auc": 0.8618488483890373,
+            "average_precision": 0.8617026615035903,
             "confusion_matrix": [
               [
-                13263,
-                239
+                13232,
+                270
               ],
               [
-                5258,
-                6643
+                5357,
+                6544
               ]
             ],
             "per_family_recall": {
-              "BruteForce": 0.13369467028003612,
-              "DDoS": 0.5116279069767442,
-              "DoS": 0.9972789115646259,
-              "Mirai": 0.0,
-              "Recon": 0.8689255461435578,
-              "Spoofing": 0.05227882037533512,
-              "Web-based": 0.13505311077389984
-            }
-          }
-        },
-        {
-          "target_fpr": 0.025,
-          "high_threshold": 0.9604189177676925,
-          "med_threshold": 0.48020945888384625,
-          "threshold_method": "maximize validation recall subject to FPR <= 2.50%",
-          "validation": {
-            "rows": 25403,
-            "accuracy": 0.7836082352478054,
-            "precision": 0.9652717233362395,
-            "recall": 0.5581883875304596,
-            "f1": 0.7073417451951233,
-            "fpr": 0.017701081321285735,
-            "roc_auc": 0.8405599311139096,
-            "pr_auc": 0.8657352817300581,
-            "average_precision": 0.865591260082923,
-            "confusion_matrix": [
-              [
-                13263,
-                239
-              ],
-              [
-                5258,
-                6643
-              ]
-            ],
-            "per_family_recall": {
-              "BruteForce": 0.13369467028003612,
-              "DDoS": 0.5116279069767442,
-              "DoS": 0.9972789115646259,
-              "Mirai": 0.0,
-              "Recon": 0.8689255461435578,
-              "Spoofing": 0.05227882037533512,
-              "Web-based": 0.13505311077389984
-            }
-          }
-        }
-      ],
-      "test": {
-        "rows": 25364,
-        "accuracy": 0.758279451190664,
-        "precision": 0.9974920581842501,
-        "recall": 0.4937924184737626,
-        "f1": 0.6605768698444334,
-        "fpr": 0.0011293479897605781,
-        "roc_auc": 0.9225172746060579,
-        "pr_auc": 0.93041505642985,
-        "average_precision": 0.9301926237742353,
-        "confusion_matrix": [
-          [
-            13267,
-            15
-          ],
-          [
-            6116,
-            5966
-          ]
-        ],
-        "per_family_recall": {
-          "BruteForce": 0.042666666666666665,
-          "DDoS": 0.5321100917431193,
-          "DoS": 0.9977777777777778,
-          "Mirai": 0.0,
-          "Recon": 0.7604444444444445,
-          "Spoofing": 0.028444444444444446,
-          "Web-based": 0.11587982832618025
-        }
-      },
-      "serialized_size_kb": 712.78515625,
-      "warm_single_row_ms": 1.67915
-    },
-    "Family-weighted HistGradientBoostingClassifier": {
-      "target_fpr": 0.02,
-      "high_threshold": 0.9724807307809419,
-      "med_threshold": 0.48624036539047094,
-      "threshold_method": "maximize validation recall subject to FPR <= 2.00%",
-      "validation": {
-        "rows": 25403,
-        "accuracy": 0.7735306853521238,
-        "precision": 0.9640700483091788,
-        "recall": 0.5365935635660869,
-        "f1": 0.68944669365722,
-        "fpr": 0.017627018219523033,
-        "roc_auc": 0.8417846109582449,
-        "pr_auc": 0.8649100529562569,
-        "average_precision": 0.8647593104856748,
-        "confusion_matrix": [
-          [
-            13264,
-            238
-          ],
-          [
-            5515,
-            6386
-          ]
-        ],
-        "per_family_recall": {
-          "BruteForce": 0.10975609756097561,
-          "DDoS": 0.5348837209302325,
-          "DoS": 0.9972789115646259,
-          "Mirai": 0.15384615384615385,
-          "Recon": 0.8397235844850647,
-          "Spoofing": 0.031724754244861486,
-          "Web-based": 0.08801213960546282
-        }
-      },
-      "validation_grid": [
-        {
-          "target_fpr": 0.015,
-          "high_threshold": 0.9925443985577823,
-          "med_threshold": 0.49627219927889116,
-          "threshold_method": "maximize validation recall subject to FPR <= 1.50%",
-          "validation": {
-            "rows": 25403,
-            "accuracy": 0.7677046018186828,
-            "precision": 0.9688965301656768,
-            "recall": 0.520880598269053,
-            "f1": 0.6775233619323461,
-            "fpr": 0.014738557250777662,
-            "roc_auc": 0.8417846109582449,
-            "pr_auc": 0.8649100529562569,
-            "average_precision": 0.8647593104856748,
-            "confusion_matrix": [
-              [
-                13303,
-                199
-              ],
-              [
-                5702,
-                6199
-              ]
-            ],
-            "per_family_recall": {
-              "BruteForce": 0.0921409214092141,
+              "BruteForce": 0.13866305329719963,
               "DDoS": 0.4883720930232558,
               "DoS": 0.9972789115646259,
               "Mirai": 0.0,
-              "Recon": 0.8281319661168078,
-              "Spoofing": 0.009830205540661306,
-              "Web-based": 0.025796661608497723
-            }
-          }
-        },
-        {
-          "target_fpr": 0.02,
-          "high_threshold": 0.9724807307809419,
-          "med_threshold": 0.48624036539047094,
-          "threshold_method": "maximize validation recall subject to FPR <= 2.00%",
-          "validation": {
-            "rows": 25403,
-            "accuracy": 0.7735306853521238,
-            "precision": 0.9640700483091788,
-            "recall": 0.5365935635660869,
-            "f1": 0.68944669365722,
-            "fpr": 0.017627018219523033,
-            "roc_auc": 0.8417846109582449,
-            "pr_auc": 0.8649100529562569,
-            "average_precision": 0.8647593104856748,
-            "confusion_matrix": [
-              [
-                13264,
-                238
-              ],
-              [
-                5515,
-                6386
-              ]
-            ],
-            "per_family_recall": {
-              "BruteForce": 0.10975609756097561,
-              "DDoS": 0.5348837209302325,
-              "DoS": 0.9972789115646259,
-              "Mirai": 0.15384615384615385,
-              "Recon": 0.8397235844850647,
-              "Spoofing": 0.031724754244861486,
-              "Web-based": 0.08801213960546282
-            }
-          }
-        },
-        {
-          "target_fpr": 0.025,
-          "high_threshold": 0.9724807307809419,
-          "med_threshold": 0.48624036539047094,
-          "threshold_method": "maximize validation recall subject to FPR <= 2.50%",
-          "validation": {
-            "rows": 25403,
-            "accuracy": 0.7735306853521238,
-            "precision": 0.9640700483091788,
-            "recall": 0.5365935635660869,
-            "f1": 0.68944669365722,
-            "fpr": 0.017627018219523033,
-            "roc_auc": 0.8417846109582449,
-            "pr_auc": 0.8649100529562569,
-            "average_precision": 0.8647593104856748,
-            "confusion_matrix": [
-              [
-                13264,
-                238
-              ],
-              [
-                5515,
-                6386
-              ]
-            ],
-            "per_family_recall": {
-              "BruteForce": 0.10975609756097561,
-              "DDoS": 0.5348837209302325,
-              "DoS": 0.9972789115646259,
-              "Mirai": 0.15384615384615385,
-              "Recon": 0.8397235844850647,
-              "Spoofing": 0.031724754244861486,
-              "Web-based": 0.08801213960546282
+              "Recon": 0.8584485064645564,
+              "Spoofing": 0.02993744414655943,
+              "Web-based": 0.11836115326251896
             }
           }
         }
       ],
       "test": {
         "rows": 25364,
-        "accuracy": 0.7423907900961993,
-        "precision": 0.9969544965962021,
-        "recall": 0.46060254924681343,
-        "f1": 0.6300951086956522,
-        "fpr": 0.0012799277217286553,
-        "roc_auc": 0.9220543777785495,
-        "pr_auc": 0.9308250011594101,
-        "average_precision": 0.9306111670291214,
+        "accuracy": 0.7523261315249961,
+        "precision": 0.9965753424657534,
+        "recall": 0.4817083264360205,
+        "f1": 0.6494810847003682,
+        "fpr": 0.001505797319680771,
+        "roc_auc": 0.9199565342792231,
+        "pr_auc": 0.9296816280698352,
+        "average_precision": 0.9294601634507881,
         "confusion_matrix": [
           [
-            13265,
-            17
+            13262,
+            20
           ],
           [
-            6517,
-            5565
+            6262,
+            5820
           ]
         ],
         "per_family_recall": {
-          "BruteForce": 0.030222222222222223,
-          "DDoS": 0.5688073394495413,
-          "DoS": 0.9973333333333333,
-          "Mirai": 0.08333333333333333,
-          "Recon": 0.6888888888888889,
-          "Spoofing": 0.011111111111111112,
-          "Web-based": 0.09155937052932761
+          "BruteForce": 0.037333333333333336,
+          "DDoS": 0.5229357798165137,
+          "DoS": 0.9968888888888889,
+          "Mirai": 0.0,
+          "Recon": 0.736,
+          "Spoofing": 0.02,
+          "Web-based": 0.11301859799713877
         }
       },
-      "serialized_size_kb": 714.3701171875,
-      "warm_single_row_ms": 1.71185
+      "serialized_size_kb": 712.57421875,
+      "warm_single_row_ms": 6.55545
+    },
+    "Family-weighted HistGradientBoostingClassifier": {
+      "target_fpr": 0.02,
+      "high_threshold": 0.9656677788184722,
+      "med_threshold": 0.4828338894092361,
+      "threshold_method": "maximize validation recall subject to FPR <= 2.00%",
+      "validation": {
+        "rows": 25403,
+        "accuracy": 0.774947840806204,
+        "precision": 0.9637072585482903,
+        "recall": 0.5399546256617092,
+        "f1": 0.6921212773978136,
+        "fpr": 0.01792327062657384,
+        "roc_auc": 0.836886044050948,
+        "pr_auc": 0.8627516370665331,
+        "average_precision": 0.8626027586125182,
+        "confusion_matrix": [
+          [
+            13260,
+            242
+          ],
+          [
+            5475,
+            6426
+          ]
+        ],
+        "per_family_recall": {
+          "BruteForce": 0.11517615176151762,
+          "DDoS": 0.4883720930232558,
+          "DoS": 0.9972789115646259,
+          "Mirai": 0.0,
+          "Recon": 0.8506464556397682,
+          "Spoofing": 0.020107238605898123,
+          "Web-based": 0.1047040971168437
+        }
+      },
+      "validation_grid": [
+        {
+          "target_fpr": 0.02,
+          "high_threshold": 0.9656677788184722,
+          "med_threshold": 0.4828338894092361,
+          "threshold_method": "maximize validation recall subject to FPR <= 2.00%",
+          "validation": {
+            "rows": 25403,
+            "accuracy": 0.774947840806204,
+            "precision": 0.9637072585482903,
+            "recall": 0.5399546256617092,
+            "f1": 0.6921212773978136,
+            "fpr": 0.01792327062657384,
+            "roc_auc": 0.836886044050948,
+            "pr_auc": 0.8627516370665331,
+            "average_precision": 0.8626027586125182,
+            "confusion_matrix": [
+              [
+                13260,
+                242
+              ],
+              [
+                5475,
+                6426
+              ]
+            ],
+            "per_family_recall": {
+              "BruteForce": 0.11517615176151762,
+              "DDoS": 0.4883720930232558,
+              "DoS": 0.9972789115646259,
+              "Mirai": 0.0,
+              "Recon": 0.8506464556397682,
+              "Spoofing": 0.020107238605898123,
+              "Web-based": 0.1047040971168437
+            }
+          }
+        }
+      ],
+      "test": {
+        "rows": 25364,
+        "accuracy": 0.7481864059296641,
+        "precision": 0.995303531048878,
+        "recall": 0.4735970865750703,
+        "f1": 0.6418036004710896,
+        "fpr": 0.002032826381569041,
+        "roc_auc": 0.9215905399835053,
+        "pr_auc": 0.929779169206645,
+        "average_precision": 0.9295586621878733,
+        "confusion_matrix": [
+          [
+            13255,
+            27
+          ],
+          [
+            6360,
+            5722
+          ]
+        ],
+        "per_family_recall": {
+          "BruteForce": 0.03155555555555556,
+          "DDoS": 0.5321100917431193,
+          "DoS": 0.9964444444444445,
+          "Mirai": 0.0,
+          "Recon": 0.7226666666666667,
+          "Spoofing": 0.010222222222222223,
+          "Web-based": 0.10872675250357654
+        }
+      },
+      "serialized_size_kb": 711.0576171875,
+      "warm_single_row_ms": 5.63195
     }
   },
   "winner": "HistGradientBoostingClassifier",
   "baseline": {
     "target_fpr": 0.03,
-    "high_threshold": 0.9530080277197047,
-    "med_threshold": 0.47650401385985236,
+    "high_threshold": 0.9591747461546033,
+    "med_threshold": 0.47958737307730165,
     "threshold_method": "maximize validation F1 subject to FPR <= 3.00%",
     "validation": {
       "rows": 25403,
-      "accuracy": 0.7820336180766051,
-      "precision": 0.9493081050550692,
-      "recall": 0.564910511721704,
-      "f1": 0.7083179687088448,
-      "fpr": 0.026588653532809953,
-      "roc_auc": 0.8405599311139096,
-      "pr_auc": 0.8657352817300581,
-      "average_precision": 0.865591260082923,
+      "accuracy": 0.7788056528756446,
+      "precision": 0.9469265793966989,
+      "recall": 0.5591967061591463,
+      "f1": 0.7031538908553014,
+      "fpr": 0.02762553695748778,
+      "roc_auc": 0.83532462633544,
+      "pr_auc": 0.8618488483890373,
+      "average_precision": 0.8617026615035903,
       "confusion_matrix": [
         [
-          13143,
-          359
+          13129,
+          373
         ],
         [
-          5178,
-          6723
+          5246,
+          6655
         ]
       ],
       "per_family_recall": {
-        "BruteForce": 0.14995483288166214,
-        "DDoS": 0.5232558139534884,
+        "BruteForce": 0.14814814814814814,
+        "DDoS": 0.4883720930232558,
         "DoS": 0.9972789115646259,
-        "Mirai": 0.07692307692307693,
-        "Recon": 0.8707088720463665,
-        "Spoofing": 0.06478999106344951,
-        "Web-based": 0.1441578148710167
+        "Mirai": 0.0,
+        "Recon": 0.872046366473473,
+        "Spoofing": 0.03842716711349419,
+        "Web-based": 0.13353566009104703
       }
     },
     "candidate": "HistGradientBoostingClassifier",
     "test": {
       "rows": 25364,
-      "accuracy": 0.7615912316669295,
-      "precision": 0.9962177273474757,
-      "recall": 0.5014070518126138,
-      "f1": 0.6670704178825084,
-      "fpr": 0.0017316669176328865,
-      "roc_auc": 0.9225172746060579,
-      "pr_auc": 0.93041505642985,
-      "average_precision": 0.9301926237742353,
+      "accuracy": 0.7548099668821953,
+      "precision": 0.995772027735498,
+      "recall": 0.4873365336864757,
+      "f1": 0.6544040011114198,
+      "fpr": 0.0018822466496009637,
+      "roc_auc": 0.9199565342792231,
+      "pr_auc": 0.9296816280698352,
+      "average_precision": 0.9294601634507881,
       "confusion_matrix": [
         [
-          13259,
-          23
+          13257,
+          25
         ],
         [
-          6024,
-          6058
+          6194,
+          5888
         ]
       ],
       "per_family_recall": {
-        "BruteForce": 0.06177777777777778,
-        "DDoS": 0.5596330275229358,
-        "DoS": 0.9977777777777778,
+        "BruteForce": 0.03911111111111111,
+        "DDoS": 0.5229357798165137,
+        "DoS": 0.9968888888888889,
         "Mirai": 0.0,
-        "Recon": 0.766,
-        "Spoofing": 0.03244444444444444,
-        "Web-based": 0.13304721030042918
+        "Recon": 0.7482222222222222,
+        "Spoofing": 0.02,
+        "Web-based": 0.12589413447782546
       }
     },
     "test_missed_scores": {
       "BruteForce": {
-        "missed": 2111,
-        "below_medium": 475,
-        "medium_to_high": 1636,
-        "min": 0.08345110119897194,
-        "median": 0.6859846103996424,
-        "max": 0.9526286783200705
+        "missed": 2162,
+        "below_medium": 524,
+        "medium_to_high": 1638,
+        "min": 0.0974764652761146,
+        "median": 0.633599159856934,
+        "max": 0.9584090427570501
       },
       "DDoS": {
-        "missed": 48,
-        "below_medium": 23,
-        "medium_to_high": 25,
-        "min": 0.0695833299904806,
-        "median": 0.5307181326289611,
-        "max": 0.9462335283219132
+        "missed": 52,
+        "below_medium": 26,
+        "medium_to_high": 26,
+        "min": 0.06088621322378235,
+        "median": 0.49690889827482276,
+        "max": 0.9590925556720724
       },
       "DoS": {
-        "missed": 5,
-        "below_medium": 1,
-        "medium_to_high": 4,
-        "min": 0.27062510893263836,
-        "median": 0.8406477847205674,
-        "max": 0.9284250440114112
+        "missed": 7,
+        "below_medium": 2,
+        "medium_to_high": 5,
+        "min": 0.27695280460348454,
+        "median": 0.8752555425470864,
+        "max": 0.9564506811084834
       },
       "Mirai": {
         "missed": 24,
-        "below_medium": 9,
-        "medium_to_high": 15,
-        "min": 0.07767585451027073,
-        "median": 0.6617839733254891,
-        "max": 0.9521847125721616
+        "below_medium": 12,
+        "medium_to_high": 12,
+        "min": 0.138319980249381,
+        "median": 0.4464481463757915,
+        "max": 0.8966077711072254
       },
       "Recon": {
-        "missed": 1053,
-        "below_medium": 377,
-        "medium_to_high": 676,
-        "min": 0.03915407657349016,
-        "median": 0.6877046813227581,
-        "max": 0.9529780186920742
+        "missed": 1133,
+        "below_medium": 363,
+        "medium_to_high": 770,
+        "min": 0.03204377764198242,
+        "median": 0.7205857568300635,
+        "max": 0.9591382462606448
       },
       "Spoofing": {
-        "missed": 2177,
-        "below_medium": 1301,
-        "medium_to_high": 876,
-        "min": 0.02820240013549857,
-        "median": 0.369935828833388,
-        "max": 0.9502311525518065
+        "missed": 2205,
+        "below_medium": 1309,
+        "medium_to_high": 896,
+        "min": 0.04093890402033246,
+        "median": 0.3862605102224899,
+        "max": 0.9564986628554942
       },
       "Web-based": {
-        "missed": 606,
-        "below_medium": 194,
-        "medium_to_high": 412,
-        "min": 0.10265487088027904,
-        "median": 0.6983303554777125,
-        "max": 0.9527130845194985
+        "missed": 611,
+        "below_medium": 182,
+        "medium_to_high": 429,
+        "min": 0.13307009291894037,
+        "median": 0.7116556088671565,
+        "max": 0.958711316646254
       }
     }
   }

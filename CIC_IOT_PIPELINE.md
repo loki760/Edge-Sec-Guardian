@@ -15,6 +15,18 @@ $python = '.\.venv\Scripts\python.exe'
 
 Run the commands in sequence and inspect any nonzero exit before continuing. Open `http://127.0.0.1:8080/` during replay. The packet and flow limits apply separately to each input capture during dataset construction. Counts and model quality depend on which portions of the captures were sampled. See the generated EDA, feature-selection and model-comparison reports for this run. Model evaluation covers ML-only predictions at the saved high threshold. The synthetic integration test uses small temporary captures for wiring checks.
 
+### Retraining with the local Pi capture
+
+After changing the flow CSV, rerun feature selection to bind the manifest to its new SHA256.
+For the dataset containing `BenignTraffic4.pcap`, the following commands keep that file
+entirely in training and retain all 29 features. Validation and test each use a different
+whole benign capture. The trainer reconstructs this split from the manifest and checks its hashes.
+
+```powershell
+& $python select_ciciot_features.py --input data/processed/ciciot_flows.csv --train-capture BenignTraffic4.pcap --all-features
+& $python train_ciciot_model.py --input data/processed/ciciot_flows.csv --target-fpr 0.020
+```
+
 ## Reading a dashboard result
 
 The dashboard loads a trusted project-generated pickle once at startup. Each completed flow receives the fitted model’s attack probability from its saved ordered numeric feature columns. Endpoints and timestamps go only to the dashboard and rule logic. A probability at or above the stored high threshold contributes an ML signal. A probability between the stored medium and high thresholds gives Medium risk without an alert.
