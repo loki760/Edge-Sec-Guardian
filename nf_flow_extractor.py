@@ -247,11 +247,11 @@ def iter_pcap_flows(path, engine=None, stop=None, max_packets=None, max_flows=No
                      flows_over_cap=engine.emitted - written)
 
 
-def stream_live_flows(interface, on_flow, engine=None, stop=None):
+def stream_live_flows(interface, on_flow, engine=None, stop=None, measure=None):
     engine = engine or FlowEngine()
 
     def deliver(rows):
-        for row in rows:
+        for row in (measure(rows) if measure else rows):
             on_flow(row)
 
     sock = conf.L2listen(iface=interface)

@@ -151,6 +151,7 @@ class Dashboard:
                 elif flow["explanation_status"] == "ready" and "explanation_source_id" in flow:
                     self.explainer_stats["reused_count"] += 1
             self.traffic.appendleft(flow)
+        return flow
 
     def prepare_explanation(self, flow):
         """Reserve queue space under the dashboard lock before persisting the alert."""
@@ -197,7 +198,7 @@ class Dashboard:
         while (job := self.explanation_queue.get()) is not None:
             alert_id, key, prompt, schema = job
             with self.lock:
-                closing_worker = self.explainer_closed
+                closing_worker = self.explainer_closed and not self.drain_explanations
                 if closing_worker:
                     self.explainer_stats["skipped_count"] += 1
                 else:
@@ -267,12 +268,13 @@ class Dashboard:
                 elif flow.get("explanation_source_id") == alert_id:
                     flow.update(shared)
 
-    def close(self):
-        """Finish the active request and mark queued requests skipped on shutdown."""
+    def close(self, *, drain=False):
+        """Stop the worker, optionally completing queued benchmark jobs."""
         with self.lock:
             if self.explanation_worker is None or self.explainer_closed:
                 return
             self.explainer_closed = True
+            self.drain_explanations = drain
         self.explanation_queue.put(None)
         self.explanation_worker.join()
 
@@ -397,6 +399,7 @@ def main():
     scoring = parser.add_mutually_exclusive_group()
     scoring.add_argument("--demo-rules", action="store_true")
     scoring.add_argument("--model", help="Trusted CIC model bundle; enables ML and traffic rules")
+    parser.add_argument("--alerts-db", default="artifacts/alerts.db", help="Local alert database")
     parser.add_argument("--explainer", choices=("none", "ollama", "executorch"), default="none")
     parser.add_argument("--explain-min-level", choices=tuple(EXPLANATION_LEVELS), default="high")
     parser.add_argument("--explain-cooldown", type=float, default=DEFAULT_EXPLANATION_COOLDOWN,
@@ -421,7 +424,7 @@ def main():
         explainer = create_explainer(args.explainer, args.llama_model, args.llama_tokenizer, args.ollama_url)
     except (OSError, ValueError, RuntimeError) as exc:
         parser.error(str(exc))
-    state = Dashboard(ROOT / "artifacts/alerts.db", scorer, mode, explainer, args.explain_min_level,
+    state = Dashboard(args.alerts_db, scorer, mode, explainer, args.explain_min_level,
                       explanation_cooldown=args.explain_cooldown)
     stop = threading.Event()
     try:

@@ -30,3 +30,9 @@ secrets/
 id_rsa*
 id_ed25519*
 artifacts/*.db
+artifacts/benchmark*.json
+artifacts/benchmark*.md
+artifacts/wheels/
+artifacts/wheel-smoke/
+build/
+*.egg-info/
