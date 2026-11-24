@@ -1,13 +1,17 @@
 """Local explanation backends and constrained CIC alert summaries."""
 
 from contextlib import contextmanager
+import ctypes
+from importlib import import_module
 import json
 import math
 from http.client import HTTPException
 from pathlib import Path
 import re
+import sys
 from time import perf_counter
 import unicodedata
+import warnings
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
@@ -182,10 +186,40 @@ class OllamaExplainer:
         raise RuntimeError("Ollama generation is incomplete")
 
 
+def preload_executorch_kernels():
+    try:
+        import_module("executorch.extension.llm.custom_ops.custom_ops")
+    except (ImportError, OSError, RuntimeError):
+        pass
+    if sys.platform != "linux":
+        return []
+    try:
+        package = import_module("executorch")
+    except ImportError:
+        return []
+    libraries = (
+        "lib/libexecutorch_kernels_optimized.so",
+        "lib/libexecutorch_kernels_quantized.so",
+        "lib/libexecutorch_kernels_torchao.so",
+        "extension/llm/custom_ops/libcustom_ops_aot_lib.so",
+    )
+    handles = []
+    for root in getattr(package, "__path__", ()):
+        for library in libraries:
+            path = Path(root) / library
+            if path.is_file():
+                try:
+                    handles.append(ctypes.CDLL(str(path), mode=ctypes.RTLD_GLOBAL))
+                except OSError as error:
+                    warnings.warn(f"Could not preload ExecuTorch kernel {path}: {error}", RuntimeWarning)
+    return handles
+
+
 class ExecuTorchExplainer:
     mode = "executorch"
 
     def __init__(self, model_path, tokenizer_path):
+        self.kernel_handles = preload_executorch_kernels()
         try:
             from executorch.extension.llm.runner import GenerationConfig, TextLLMRunner
         except (ImportError, OSError, RuntimeError) as error:
@@ -195,19 +229,26 @@ class ExecuTorchExplainer:
         model_path, tokenizer_path = Path(model_path), Path(tokenizer_path)
         if model_path.suffix.lower() != ".pte" or not model_path.is_file() or not tokenizer_path.is_file():
             raise ValueError("ExecuTorch requires a local .pte model and matching tokenizer file")
-        # Register available kernels before constructing the resident runner.
-        try:
-            from executorch.extension.llm.custom_ops import custom_ops  # noqa: F401
-            from executorch.kernels import quantized  # noqa: F401
-        except ImportError:
-            pass
         self.runner = TextLLMRunner(str(model_path), str(tokenizer_path))
-        self.config = GenerationConfig(max_new_tokens=ALERT_MAX_TOKENS, temperature=0.0, echo=False, num_bos=1)
+        load = getattr(self.runner, "load", None)
+        if callable(load):
+            is_loaded = getattr(self.runner, "is_loaded", False)
+            if not (is_loaded() if callable(is_loaded) else is_loaded):
+                load()
+        # The chat template already supplies the beginning-of-text marker.
+        self.config = GenerationConfig(echo=False, max_new_tokens=ALERT_MAX_TOKENS, temperature=0.2)
 
     def generate(self, prompt, schema):
         chunks, timings = [], dict(ttft_ms=None, tokens_per_sec=None)
-        self.runner.reset()
-        start = perf_counter()
+        reset = getattr(self.runner, "reset", None)
+        if callable(reset):
+            reset()
+        chat = (
+            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            "You are a calm network assistant. Return only the requested JSON."
+            "<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n"
+            + prompt + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+        )
 
         def on_token(token):
             if token and timings["ttft_ms"] is None:
@@ -215,12 +256,17 @@ class ExecuTorchExplainer:
             chunks.append(token)
 
         def on_stats(stats):
-            duration_ms = stats.inference_end_ms - stats.first_token_ms
-            timings["tokens_per_sec"] = token_rate(
-                stats.num_generated_tokens, duration_ms / 1000)
+            first = nonnegative_number(getattr(stats, "first_token_ms", None))
+            end = nonnegative_number(getattr(stats, "inference_end_ms", None))
+            if first is not None and end is not None:
+                timings["tokens_per_sec"] = token_rate(
+                    getattr(stats, "num_generated_tokens", None), (end - first) / 1000)
 
-        self.runner.generate(prompt, self.config, on_token, on_stats)
-        return "".join(chunks).removesuffix("<|eot_id|>").removesuffix("<|end_of_text|>"), timings
+        start = perf_counter()
+        self.runner.generate(chat, self.config, token_callback=on_token, stats_callback=on_stats)
+        timings["total_latency_ms"] = (perf_counter() - start) * 1000
+        text = re.sub(r"(?:\s*<\|(?:eot_id|end_of_text)\|>)+\s*\Z", "", "".join(chunks))
+        return text, timings
 
 
 def create_explainer(mode, model_path=None, tokenizer_path=None, ollama_url="http://localhost:11434"):

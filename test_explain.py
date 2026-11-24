@@ -168,10 +168,12 @@ class ExplainTests(unittest.TestCase):
         bindings = MagicMock()
         runner = bindings.TextLLMRunner.return_value
 
-        def generate(prompt, config, on_token, on_stats):
-            on_token("output")
-            on_stats(SimpleNamespace(first_token_ms=50, inference_end_ms=550, num_generated_tokens=4))
+        def generate(prompt, config, *, token_callback, stats_callback):
+            token_callback("output")
+            token_callback("<|eot_id|>\n<|end_of_text|> ")
+            stats_callback(SimpleNamespace(first_token_ms=50, inference_end_ms=550, num_generated_tokens=4))
 
+        runner.is_loaded.return_value = False
         runner.generate.side_effect = generate
         with tempfile.TemporaryDirectory() as tmp:
             model, tokenizer = (Path(tmp) / name for name in ("model.pte", "tokenizer.model"))
@@ -184,14 +186,46 @@ class ExplainTests(unittest.TestCase):
             }):
                 backend = create_explainer("executorch", model, tokenizer)
                 bindings.TextLLMRunner.assert_called_once_with(str(model), str(tokenizer))
-                self.assertEqual(bindings.GenerationConfig.call_args.kwargs["max_new_tokens"], 100)
+                runner.load.assert_called_once_with()
+                bindings.GenerationConfig.assert_called_once_with(echo=False, max_new_tokens=100, temperature=0.2)
                 runner.generate.assert_not_called()
             for prompt in ("first prompt", "second prompt"):
-                output, timing = backend.generate(prompt, {})
+                with patch("explain.perf_counter", side_effect=(10.0, 10.25, 10.75)):
+                    output, timing = backend.generate(prompt, {})
                 self.assertEqual(output, "output")
-                self.assertGreaterEqual(timing["ttft_ms"], 0)
-                self.assertEqual(timing["tokens_per_sec"], 8)
+                self.assertEqual(timing, dict(ttft_ms=250, total_latency_ms=750, tokens_per_sec=8))
+                chat = runner.generate.call_args.args[0]
+                self.assertTrue(chat.startswith("<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"))
+                self.assertIn("<|start_header_id|>user<|end_header_id|>\n\n" + prompt + "<|eot_id|>", chat)
+                self.assertTrue(chat.endswith("<|start_header_id|>assistant<|end_header_id|>\n\n"))
             self.assertEqual(runner.reset.call_count, 2)
+            runner.load.assert_called_once_with()
+
+    def test_executorch_preloads_existing_linux_kernels_before_runner(self):
+        bindings = MagicMock()
+        bindings.TextLLMRunner.return_value.is_loaded.return_value = True
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            model, tokenizer = root / "model.pte", root / "tokenizer.model"
+            lib = root / "lib/libexecutorch_kernels_quantized.so"
+            ops = root / "extension/llm/custom_ops/libcustom_ops_aot_lib.so"
+            for path in (model, tokenizer, lib, ops):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            with patch.dict("sys.modules", {
+                "executorch": SimpleNamespace(__path__=[tmp]),
+                "executorch.extension.llm.custom_ops.custom_ops": SimpleNamespace(),
+                "executorch.extension.llm.runner": bindings,
+            }), patch("explain.sys", SimpleNamespace(platform="linux")), patch("explain.ctypes.CDLL") as cdll:
+                def create_runner(*_):
+                    self.assertEqual(cdll.call_count, 2)
+                    return bindings.TextLLMRunner.return_value
+
+                bindings.TextLLMRunner.side_effect = create_runner
+                backend = create_explainer("executorch", model, tokenizer)
+                self.assertEqual([call.args[0] for call in cdll.call_args_list], [str(lib), str(ops)])
+                self.assertEqual(len(backend.kernel_handles), 2)
+                backend.runner.load.assert_not_called()
 
 
 if __name__ == "__main__":

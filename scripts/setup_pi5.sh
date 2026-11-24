@@ -23,8 +23,8 @@ import struct
 import sys
 if sys.version_info < (3, 10) or struct.calcsize("P") != 8:
     sys.exit("The virtual environment needs 64-bit Python 3.10 or newer.")
-if sys.version_info[:2] not in ((3, 10), (3, 11), (3, 12)):
-    print("For ExecuTorch ARM64 wheel compatibility, prefer Python 3.10–3.12 and check the chosen release.")
+if sys.version_info[:2] not in ((3, 10), (3, 11), (3, 12), (3, 13)):
+    print("Check ARM64 wheel availability for your Python version. ExecuTorch 1.6.0 was verified on Pi 5 with Python 3.13.5.")
 '
 
 # pyproject.toml declares scikit-learn, pandas, NumPy, Scapy, psutil and threadpoolctl.
@@ -36,8 +36,9 @@ Setup complete. Run these commands from the project directory.
   .venv/bin/python -m unittest -v
 
 For local ExecuTorch, install an ARM64 build compatible with your Python version
-that includes the LLM runner bindings. Start by checking the available wheels:
+that includes the LLM runner bindings. Install CPU-only PyTorch first:
 
+  .venv/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
   .venv/bin/python -m pip install --only-binary=:all: executorch
   .venv/bin/python -c 'from executorch.extension.llm.runner import TextLLMRunner'
 
