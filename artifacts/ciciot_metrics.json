@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "input": "data/processed/ciciot_flows.csv",
+  "feature_columns": [
+    "PROTOCOL_NUM",
+    "IN_PKTS",
+    "OUT_PKTS",
+    "IN_BYTES",
+    "OUT_BYTES",
+    "FLOW_DURATION_MILLISECONDS",
+    "PKTS_PER_SEC",
+    "BYTES_PER_SEC",
+    "IN_OUT_PKT_RATIO",
+    "IN_OUT_BYTE_RATIO",
+    "PKT_LEN_MIN",
+    "PKT_LEN_MAX",
+    "PKT_LEN_MEAN",
+    "PKT_LEN_STD",
+    "TTL_MEAN",
+    "SYN_RATIO",
+    "ACK_RATIO",
+    "FIN_RATIO",
+    "RST_RATIO",
+    "PSH_RATIO",
+    "URG_RATIO",
+    "SRC_TO_DST_IAT_MIN",
+    "SRC_TO_DST_IAT_MAX",
+    "SRC_TO_DST_IAT_AVG",
+    "SRC_TO_DST_IAT_STDDEV",
+    "DST_TO_SRC_IAT_MIN",
+    "DST_TO_SRC_IAT_MAX",
+    "DST_TO_SRC_IAT_AVG",
+    "DST_TO_SRC_IAT_STDDEV"
+  ],
+  "input_sha256": "3d68bb16c1a1ed946be92adb4f3f62ff64b4db374e89a0668410c94e9786b9af",
+  "split_hashes": {
+    "train": "6333e393e534f5f4baa8d70ed1e113685696b49ea18820f862590086e8800084",
+    "val": "9139a17cd5bb497ecb1266f168d306bbfa07611d75dd24208f3aeef10816f058",
+    "test": "6aea2b03d48897182fdc8493ad2e03c366f18b7e37ced83a30b461730becc605"
+  },
+  "split_rows": {
+    "train": 69628,
+    "val": 25403,
+    "test": 25364
+  },
+  "models": {
+    "RandomForestClassifier": {
+      "high_threshold": 0.7321428571428572,
+      "med_threshold": 0.3660714285714286,
+      "threshold_method": "validation best F1 because no interior cutoff met FPR <= 3%",
+      "validation": {
+        "rows": 25403,
+        "accuracy": 0.7044443569657127,
+        "precision": 0.6442503447822946,
+        "recall": 0.8243004789513486,
+        "f1": 0.7232379828959009,
+        "fpr": 0.40119982224855577,
+        "roc_auc": 0.8094632486890594,
+        "pr_auc": 0.823305823991218,
+        "average_precision": 0.7754347753983968,
+        "confusion_matrix": [
+          [
+            8085,
+            5417
+          ],
+          [
+            2091,
+            9810
+          ]
+        ],
+        "per_family_recall": {
+          "BruteForce": 0.6088527551942186,
+          "DDoS": 0.8023255813953488,
+          "DoS": 0.999546485260771,
+          "Mirai": 0.46153846153846156,
+          "Recon": 0.9658938921087828,
+          "Spoofing": 0.6076854334226989,
+          "Web-based": 0.7435508345978755
+        }
+      },
+      "test": {
+        "rows": 25364,
+        "accuracy": 0.8089812332439679,
+        "precision": 0.8159434209377455,
+        "recall": 0.7734646581691773,
+        "f1": 0.794136392606756,
+        "fpr": 0.15871103749435325,
+        "roc_auc": 0.8772055437769131,
+        "pr_auc": 0.897054981216556,
+        "average_precision": 0.891869018436754,
+        "confusion_matrix": [
+          [
+            11174,
+            2108
+          ],
+          [
+            2737,
+            9345
+          ]
+        ],
+        "per_family_recall": {
+          "BruteForce": 0.6408888888888888,
+          "DDoS": 0.7798165137614679,
+          "DoS": 1.0,
+          "Mirai": 0.375,
+          "Recon": 0.9206666666666666,
+          "Spoofing": 0.3968888888888889,
+          "Web-based": 0.748211731044349
+        }
+      },
+      "serialized_size_kb": 78823.634765625,
+      "warm_single_row_ms": 18.9777
+    },
+    "HistGradientBoostingClassifier": {
+      "high_threshold": 0.9530080277197047,
+      "med_threshold": 0.47650401385985236,
+      "threshold_method": "maximize validation F1 subject to FPR <= 3%",
+      "validation": {
+        "rows": 25403,
+        "accuracy": 0.7820336180766051,
+        "precision": 0.9493081050550692,
+        "recall": 0.564910511721704,
+        "f1": 0.7083179687088448,
+        "fpr": 0.026588653532809953,
+        "roc_auc": 0.8405599311139096,
+        "pr_auc": 0.8657352817300581,
+        "average_precision": 0.865591260082923,
+        "confusion_matrix": [
+          [
+            13143,
+            359
+          ],
+          [
+            5178,
+            6723
+          ]
+        ],
+        "per_family_recall": {
+          "BruteForce": 0.14995483288166214,
+          "DDoS": 0.5232558139534884,
+          "DoS": 0.9972789115646259,
+          "Mirai": 0.07692307692307693,
+          "Recon": 0.8707088720463665,
+          "Spoofing": 0.06478999106344951,
+          "Web-based": 0.1441578148710167
+        }
+      },
+      "test": {
+        "rows": 25364,
+        "accuracy": 0.7615912316669295,
+        "precision": 0.9962177273474757,
+        "recall": 0.5014070518126138,
+        "f1": 0.6670704178825084,
+        "fpr": 0.0017316669176328865,
+        "roc_auc": 0.9225172746060579,
+        "pr_auc": 0.93041505642985,
+        "average_precision": 0.9301926237742353,
+        "confusion_matrix": [
+          [
+            13259,
+            23
+          ],
+          [
+            6024,
+            6058
+          ]
+        ],
+        "per_family_recall": {
+          "BruteForce": 0.06177777777777778,
+          "DDoS": 0.5596330275229358,
+          "DoS": 0.9977777777777778,
+          "Mirai": 0.0,
+          "Recon": 0.766,
+          "Spoofing": 0.03244444444444444,
+          "Web-based": 0.13304721030042918
+        }
+      },
+      "serialized_size_kb": 712.75,
+      "warm_single_row_ms": 6.8629
+    }
+  },
+  "winner": "HistGradientBoostingClassifier"
+}

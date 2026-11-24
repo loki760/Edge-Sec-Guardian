@@ -9,7 +9,6 @@ __pycache__/
 .cache/
 data/raw/
 data/processed/
-artifacts/
 *.csv
 !data/features.csv
 *.tsv
@@ -30,3 +29,4 @@ secrets/
 *.key
 id_rsa*
 id_ed25519*
+artifacts/*.db
