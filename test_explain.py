@@ -127,6 +127,19 @@ class ExplainTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 parse_alert_response(bad, schema)
 
+    def test_prefixed_executorch_json_uses_existing_validation(self):
+        _, schema = build_alert_prompt(dict(verdict="Flagged", risk_level="High", features={}))
+        safe = dict(explanation='The device sent a burst of messages containing "}".',
+                    recommended_action="Check whether this traffic was expected.")
+        prefix = "Here is the JSON response:\n\n"
+        payload = json.dumps(safe)
+        for text in (payload + "<|eot_id|>",
+                     "```json\n" + payload + "\n```<|end_of_text|>"):
+            self.assertEqual(parse_alert_response(prefix + text, schema), safe)
+        unsafe = dict(safe, recommended_action="Automatically block this device.")
+        with self.assertRaisesRegex(ValueError, "Unsafe explanation text"):
+            parse_alert_response(prefix + json.dumps(unsafe) + payload, schema)
+
     def test_fenced_prose_and_length_limits(self):
         _, schema = build_alert_prompt(dict(verdict="Flagged", risk_level="High", features={}))
         safe = dict(explanation="The alert suggests a sudden rush of network traffic.",

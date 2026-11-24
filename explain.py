@@ -33,6 +33,7 @@ ALERT_MAX_TOKENS = 100
 ALERT_MAX_CHARS = 180
 ALERT_FIELDS = ("explanation", "recommended_action")
 FENCED_JSON = re.compile(r"```(?:json)?\s*\n(.*?)\n\s*```", re.IGNORECASE | re.DOTALL)
+TRAILING_LLAMA_TOKENS = re.compile(r"(?:\s*<\|(?:eot_id|end_of_text)\|>)+\s*\Z")
 UNSAFE_TEXT = re.compile(
     r"\b(?:auto\s*[-–—]?\s*(?:matically|mated|block|delete|ban|disconnect|isolate|quarantine|reconfigure)"
     r"|block\w*|blacklist\w*|ban(?:s|ned|ning)?|denylist\w*|delet\w+|eras\w+|wip\w+|purg\w+"
@@ -99,9 +100,17 @@ def unique_fields(pairs):
 def parse_alert_response(text, schema):
     if not isinstance(text, str) or len(text) > 4096:
         raise ValueError("Invalid explanation response size")
-    text = text.strip()
+    text = TRAILING_LLAMA_TOKENS.sub("", text).strip()
     fence = FENCED_JSON.fullmatch(text)
-    result = json.loads(fence[1] if fence else text, object_pairs_hook=unique_fields)
+    text = fence[1] if fence else text
+    try:
+        result = json.loads(text, object_pairs_hook=unique_fields)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        if start == -1:
+            raise
+        # The JSON decoder finds the matching brace even inside nested or quoted values.
+        result, _ = json.JSONDecoder(object_pairs_hook=unique_fields).raw_decode(text, start)
     fields = schema["properties"]
     if not isinstance(result, dict) or result.keys() != fields.keys():
         raise ValueError("Expected exactly explanation and recommended_action")
@@ -245,7 +254,7 @@ class ExecuTorchExplainer:
             reset()
         chat = (
             "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-            "You are a calm network assistant. Return only the requested JSON."
+            "You are a calm network assistant. Output ONLY the raw JSON object starting with { and nothing else."
             "<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n"
             + prompt + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
         )
@@ -265,7 +274,7 @@ class ExecuTorchExplainer:
         start = perf_counter()
         self.runner.generate(chat, self.config, token_callback=on_token, stats_callback=on_stats)
         timings["total_latency_ms"] = (perf_counter() - start) * 1000
-        text = re.sub(r"(?:\s*<\|(?:eot_id|end_of_text)\|>)+\s*\Z", "", "".join(chunks))
+        text = TRAILING_LLAMA_TOKENS.sub("", "".join(chunks))
         return text, timings
 
 
