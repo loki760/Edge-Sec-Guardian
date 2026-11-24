@@ -11,6 +11,22 @@ import sklearn
 from nf_flow_extractor import MODEL_FEATURE_COLUMNS
 
 
+def flood_signal(features):
+    """Use completed-flow volume, direction and forward rate for UDP and ICMP."""
+    protocol = features["PROTOCOL_NUM"]
+    if protocol not in (1, 17):
+        return None
+    forward = features["IN_PKTS"]
+    duration_ms = features["FLOW_DURATION_MILLISECONDS"]
+    if forward < 100 or duration_ms <= 0 or features["OUT_PKTS"] > 0.1 * forward:
+        return None
+    rate = 1000 * forward / duration_ms
+    if rate >= 1000 or (duration_ms >= 1000 and rate >= 100):
+        name = "UDP" if protocol == 17 else "ICMP"
+        return f"Rule: {name} flood pattern"
+    return None
+
+
 def validate_bundle(bundle):
     if not isinstance(bundle, dict) or type(bundle.get("schema_version")) is not int or bundle["schema_version"] != 1:
         raise ValueError("Expected CIC model bundle schema version 1")
@@ -102,7 +118,11 @@ class RiskFusionScorer:
             if (features["PROTOCOL_NUM"] == 6 and features["IN_PKTS"] >= 10
                     and features["SYN_RATIO"] >= 0.8 and features["ACK_RATIO"] <= 0.1):
                 rules.append("Rule: SYN-heavy TCP flow")
-            if features["PKTS_PER_SEC"] >= 1000 and features["IN_PKTS"] + features["OUT_PKTS"] >= 10:
+            flood = flood_signal(features)
+            if flood:
+                rules.append(flood)
+            if (features["PROTOCOL_NUM"] not in (1, 17) and features["PKTS_PER_SEC"] >= 1000
+                    and features["IN_PKTS"] + features["OUT_PKTS"] >= 10):
                 rules.append("Rule: extreme packet rate")
         signals.extend(rules)
         flagged = bool(signals)

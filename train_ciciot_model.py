@@ -1,4 +1,4 @@
-"""Train two CIC-IoT classifiers and select the deployment model on validation."""
+"""Train CIC-IoT classifiers and select a validation operating point."""
 
 import argparse
 import json
@@ -23,7 +23,11 @@ from nf_flow_extractor import MODEL_FEATURE_COLUMNS
 from select_ciciot_features import load_selection_splits
 
 
-def calibrate_threshold(labels, probabilities):
+DEFAULT_TARGET_FPRS = (0.015, 0.020, 0.025)
+BASELINE_TARGET_FPR = 0.03
+
+
+def calibrate_threshold(labels, probabilities, target_fpr=BASELINE_TARGET_FPR, *, prefer_recall=False):
     """Score every attainable validation operating point using interior cutoffs."""
     order = np.argsort(probabilities)
     scores = np.asarray(probabilities)[order]
@@ -39,13 +43,51 @@ def calibrate_threshold(labels, probabilities):
     fp = len(labels) - below - tp
     fpr = fp / (len(labels) - labels.sum())
     f1 = 2 * tp / (2 * tp + fp + fn)
-    allowed = np.flatnonzero(fpr <= 0.03)
-    method = "maximize validation F1 subject to FPR <= 3%"
+    allowed = np.flatnonzero(fpr <= target_fpr)
+    objective = "recall" if prefer_recall else "F1"
+    method = f"maximize validation {objective} subject to FPR <= {target_fpr:.2%}"
+    ranking = tp if prefer_recall else f1
     if not len(allowed):
         allowed = range(len(cutoffs))
-        method = "validation best F1 because no interior cutoff met FPR <= 3%"
-    best = max(allowed, key=lambda i: (f1[i], -fpr[i], -abs(cutoffs[i] - 0.5)))
+        ranking = f1
+        method = f"validation best F1 because no interior cutoff met FPR <= {target_fpr:.2%}"
+    best = max(allowed, key=lambda i: (ranking[i], -fpr[i], -abs(cutoffs[i] - 0.5)))
     return float(cutoffs[best]), method
+
+
+def validation_point(frame, probabilities, target_fpr, *, prefer_recall=False):
+    high, method = calibrate_threshold(frame["label"], probabilities, target_fpr,
+                                       prefer_recall=prefer_recall)
+    return dict(target_fpr=target_fpr, high_threshold=high, med_threshold=high / 2,
+                threshold_method=method, validation=evaluate(frame, probabilities, high))
+
+
+def recall_rank(point):
+    validation = point["validation"]
+    feasible = validation["fpr"] <= point["target_fpr"]
+    primary = validation["recall"] if feasible else validation["f1"]
+    return feasible, primary, -validation["fpr"], -point["target_fpr"]
+
+
+def family_weights(train, weights):
+    """Temper attack imbalance with inverse square-root family frequency."""
+    attacks = train["label"] == 1
+    counts = train.loc[attacks, "attack_family"].value_counts()
+    factors = train.loc[attacks, "attack_family"].map(counts).to_numpy(dtype=float) ** -0.5
+    adjusted = weights.copy()
+    adjusted[attacks] *= factors / factors.mean()
+    return adjusted
+
+
+def missed_scores(frame, probabilities, point):
+    high, medium = point["high_threshold"], point["med_threshold"]
+    misses = frame.loc[(frame["label"] == 1) & (probabilities < high), ["attack_family"]].copy()
+    misses["score"] = probabilities[(frame["label"] == 1) & (probabilities < high)]
+    return {family: dict(missed=len(group), below_medium=int((group.score < medium).sum()),
+                         medium_to_high=int((group.score >= medium).sum()),
+                         min=float(group.score.min()), median=float(group.score.median()),
+                         max=float(group.score.max()))
+            for family, group in misses.groupby("attack_family")}
 
 
 def evaluate(frame, probabilities, threshold):
@@ -82,11 +124,14 @@ def comparison_report(metrics):
     lines = [
         "# CIC-IoT model comparison", "",
         f"Input: `{metrics['input']}`", "",
-        "Both models used identical feature columns and splits, with inverse-frequency "
-        "sample weights on training rows only. Each model used its own validation cutoff. "
-        "Models meeting the 3% validation FPR target took priority. Among equally feasible "
-        "models, validation F1 determined the winner, with lower FPR breaking ties and Random "
-        "Forest winning an exact tie. Test rows were evaluated after model selection.", "",
+        "All candidates used identical feature columns and splits. The original candidates "
+        "use inverse-frequency class weights. The family-weighted Histogram Gradient "
+        "Boosting candidate additionally weights attack rows by inverse square-root family "
+        "frequency, normalized to preserve the total attack weight. All weights use training rows.", "",
+        "Feasible validation points take priority, ranked by attack recall, lower achieved "
+        "FPR, then tighter target. If every point is infeasible, validation F1 takes priority. "
+        "Test evaluation follows selection. Medium thresholds are half the high threshold "
+        "and indicate risk without an ML alert.", "",
         f"Selected algorithm: **{metrics['winner']}**", "",
         f"Train / validation / test flow counts: {metrics['split_rows']['train']} / "
         f"{metrics['split_rows']['val']} / {metrics['split_rows']['test']}.", "",
@@ -94,6 +139,40 @@ def comparison_report(metrics):
         "row and predicted class by column, ordered benign then attack. Latency is the "
         "median of 50 warm, single-row predict_proba calls on this host with one worker thread.", "",
     ]
+    before = metrics["baseline"]
+    after = metrics["models"][metrics["winner"]]
+    lines.extend(["## Validation grid", "",
+                  "| Candidate | FPR target | High threshold | Validation FPR | Validation recall | Feasible |",
+                  "|---|---:|---:|---:|---:|---|"])
+    for name, result in metrics["models"].items():
+        for row in result["validation_grid"]:
+            val = row["validation"]
+            lines.append(f"| {name} | {row['target_fpr']:.2%} | {row['high_threshold']:.9f} | "
+                         f"{val['fpr']:.4%} | {val['recall']:.4%} | "
+                         f"{'Yes' if val['fpr'] <= row['target_fpr'] else 'No'} |")
+    lines.extend(["", "## Before and after", "",
+                  f"Before uses {before['candidate']} with the original 3% validation FPR "
+                  f"policy. After uses {metrics['winner']} at a {after['target_fpr']:.2%} target.", "",
+                  "| Operating point | Before | After |", "|---|---:|---:|"])
+    for key in ("high_threshold", "med_threshold"):
+        lines.append(f"| {key} | {before[key]:.12f} | {after[key]:.12f} |")
+    for key in ("recall", "fpr"):
+        lines.append(f"| Validation {key} | {before['validation'][key]:.9f} | "
+                     f"{after['validation'][key]:.9f} |")
+    for key in ("accuracy", "precision", "recall", "f1", "fpr", "roc_auc", "pr_auc"):
+        lines.append(f"| Test {key} | {before['test'][key]:.9f} | {after['test'][key]:.9f} |")
+    lines.extend(["", "| Test attack family | Recall before | Recall after |",
+                  "|---|---:|---:|"])
+    for family, recall in before["test"]["per_family_recall"].items():
+        lines.append(f"| {family} | {recall:.9f} | {after['test']['per_family_recall'][family]:.9f} |")
+    lines.extend(["", "## Baseline test misses", "",
+                  "The medium band includes its lower boundary and excludes the high threshold.", "",
+                  "| Attack family | Missed | Below medium | Medium band | Min score | Median score | Max score |",
+                  "|---|---:|---:|---:|---:|---:|---:|"])
+    for family, row in before["test_missed_scores"].items():
+        lines.append(f"| {family} | {row['missed']} | {row['below_medium']} | "
+                     f"{row['medium_to_high']} | {row['min']:.9f} | {row['median']:.9f} | {row['max']:.9f} |")
+    lines.append("")
     for name, result in metrics["models"].items():
         test = result["test"]
         lines.extend([
@@ -132,7 +211,9 @@ def save_bytes(path, data):
 
 
 def train_and_evaluate(input_path, features_path, model_path, metrics_path,
-                       report_path="reports/MODEL_COMPARISON.md"):
+                       report_path="reports/MODEL_COMPARISON.md", target_fprs=DEFAULT_TARGET_FPRS):
+    if not target_fprs or any(not 0 < value < 1 for value in target_fprs):
+        raise ValueError("FPR targets must be strictly between 0 and 1")
     paths = [Path(p).resolve() for p in
              (input_path, features_path, model_path, metrics_path, report_path)]
     if len(set(paths)) != len(paths):
@@ -144,48 +225,58 @@ def train_and_evaluate(input_path, features_path, model_path, metrics_path,
             or len(set(columns)) != len(columns)):
         raise ValueError("Selection must contain unique, recognized feature_columns")
     data, splits = load_selection_splits(paths[0], selection)
-    frames = {key: data.iloc[indices] for key, indices in splits.items()}
-    train, val = frames["train"], frames["val"]
-    for key in ("train", "val"):
-        if set(frames[key]["label"]) != {0, 1}:
+    train, val = (data.iloc[splits[key]] for key in ("train", "val"))
+    for key, frame in (("train", train), ("val", val)):
+        if set(frame["label"]) != {0, 1}:
             raise ValueError(f"{key} split needs both benign and attack rows")
     weights = compute_sample_weight("balanced", train["label"])
-    candidates = [
-        RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=1),
-        HistGradientBoostingClassifier(max_iter=200, max_depth=8, learning_rate=0.08,
-                                       early_stopping=False, random_state=42),
-    ]
-    models, results = {}, {}
+    hgb_options = dict(max_iter=200, max_depth=8, learning_rate=0.08,
+                       early_stopping=False, random_state=42)
+    candidates = {
+        "RandomForestClassifier": (RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=1),
+                                   weights),
+        "HistGradientBoostingClassifier": (HistGradientBoostingClassifier(**hgb_options), weights),
+        "Family-weighted HistGradientBoostingClassifier": (
+            HistGradientBoostingClassifier(**hgb_options), family_weights(train, weights)),
+    }
+    models, results, baseline_points = {}, {}, {}
     metrics = {"schema_version": 1, "input": str(input_path), "feature_columns": columns,
                "input_sha256": selection["input_sha256"], "split_hashes": selection["split_hashes"],
-               "split_rows": {k: len(v) for k, v in frames.items()}, "models": results}
+               "split_rows": {k: len(v) for k, v in splits.items()}, "models": results}
     with threadpool_limits(limits=1):
-        for model in candidates:
-            name = type(model).__name__
-            model.fit(train[columns], train["label"], sample_weight=weights)
+        for name, (model, sample_weights) in candidates.items():
+            model.fit(train[columns], train["label"], sample_weight=sample_weights)
             probabilities = model.predict_proba(val[columns])[:, 1]
-            high, method = calibrate_threshold(val["label"], probabilities)
-            medium = high / 2
+            grid = [validation_point(val, probabilities, target, prefer_recall=True)
+                    for target in target_fprs]
+            best = max(grid, key=recall_rank)
+            results[name] = dict(best, validation_grid=grid)
+            if name == type(model).__name__:
+                baseline_points[name] = validation_point(val, probabilities, BASELINE_TARGET_FPR)
             models[name] = {
-                "schema_version": 1, "model": model, "algorithm": name,
+                "schema_version": 1, "model": model, "algorithm": type(model).__name__,
+                "candidate": name, "target_fpr": best["target_fpr"],
                 "sklearn_version": sklearn.__version__, "feature_columns": columns,
-                "high_threshold": high, "med_threshold": medium,
+                "high_threshold": best["high_threshold"], "med_threshold": best["med_threshold"],
                 "med_threshold_method": "heuristic: half the high threshold",
                 "attack_families": sorted(train.loc[train["label"] == 1, "attack_family"].unique()),
             }
-            results[name] = {"high_threshold": high, "med_threshold": medium,
-                             "threshold_method": method,
-                             "validation": evaluate(val, probabilities, high)}
-        winner = max(results, key=lambda n: (results[n]["validation"]["fpr"] <= 0.03,
-                                              results[n]["validation"]["f1"],
-                                              -results[n]["validation"]["fpr"]))
+        winner = max(results, key=lambda name: recall_rank(results[name]))
         metrics["winner"] = winner
-        test = frames["test"]
+        baseline_name = max(baseline_points, key=lambda name: (
+            baseline_points[name]["validation"]["fpr"] <= BASELINE_TARGET_FPR,
+            baseline_points[name]["validation"]["f1"], -baseline_points[name]["validation"]["fpr"],
+        ))
+        baseline = metrics["baseline"] = dict(baseline_points[baseline_name], candidate=baseline_name)
+        test = data.iloc[splits["test"]]
         if set(test["label"]) != {0, 1}:
             raise ValueError("Test split needs both classes to evaluate FPR, ROC-AUC and PR-AUC")
         for name, bundle in models.items():
             model = bundle["model"]
             probabilities = model.predict_proba(test[columns])[:, 1]
+            if name == baseline_name:
+                baseline["test"] = evaluate(test, probabilities, baseline["high_threshold"])
+                baseline["test_missed_scores"] = missed_scores(test, probabilities, baseline)
             encoded = pickle.dumps(bundle, protocol=pickle.HIGHEST_PROTOCOL)
             results[name].update({
                 "test": evaluate(test, probabilities, bundle["high_threshold"]),
@@ -207,9 +298,12 @@ def main():
     parser.add_argument("--model", default="artifacts/ciciot_model.pkl")
     parser.add_argument("--metrics", default="artifacts/ciciot_metrics.json")
     parser.add_argument("--report", default="reports/MODEL_COMPARISON.md")
+    parser.add_argument("--target-fpr", type=float, action="append",
+                        help="Validation FPR cap, repeatable (default: 0.015, 0.020, 0.025)")
     args = parser.parse_args()
     try:
-        metrics = train_and_evaluate(args.input, args.features, args.model, args.metrics, args.report)
+        metrics = train_and_evaluate(args.input, args.features, args.model, args.metrics, args.report,
+                                     args.target_fpr or DEFAULT_TARGET_FPRS)
     except (ValueError, OSError) as error:
         parser.exit(1, f"Training failed: {error}\n")
     print(f"Saved {metrics['winner']} to {args.model}")
