@@ -98,21 +98,21 @@ class ExplainTests(unittest.TestCase):
                                                   "https://example.com"))
 
     def test_alert_evidence_is_allowlisted_and_output_has_exact_fields(self):
-        flow = dict(verdict="Flagged", risk_score=0.9, risk_level="High",
+        flow = dict(verdict="Flagged", risk_score=0.987654, risk_level="High",
                     signals=["Rule: SYN-heavy TCP flow", "UNTRUSTED_SIGNAL"],
                     metadata={"src_ip": "203.0.113.77", "payload": "PACKET_CONTENT"},
                     label="GROUND_TRUTH", attack_family="DATASET_LABEL",
                     features={"PROTOCOL_NUM": 6, "IN_PKTS": 100, "OUT_PKTS": 0,
                               "IN_BYTES": 4000, "OUT_BYTES": 0, "PKTS_PER_SEC": float("nan"),
-                              "SYN_RATIO": 0.98, "payload": "PACKET_CONTENT"})
+                              "SYN_RATIO": 0.987654, "payload": "PACKET_CONTENT"})
         prompt, schema = build_alert_prompt(flow)
         for secret in ("UNTRUSTED_SIGNAL", "203.0.113.77", "PACKET_CONTENT", "GROUND_TRUTH", "DATASET_LABEL"):
             self.assertNotIn(secret, prompt)
-        self.assertEqual(json.loads(prompt.splitlines()[-1]), {
-            "verdict": "Flagged", "risk_score": 0.9, "risk_level": "High", "protocol": "TCP",
-            "signals": ["Rule: SYN-heavy TCP flow"], "IN_PKTS": 100, "OUT_PKTS": 0,
-            "IN_BYTES": 4000, "OUT_BYTES": 0, "PKTS_PER_SEC": None, "SYN_RATIO": 0.98,
-        })
+        self.assertEqual(prompt.splitlines()[-3:], [
+            "Verdict: Flagged (High, score 0.988)",
+            "Signals: Rule: SYN-heavy TCP flow",
+            "Traffic: TCP, 100 in / 0 out packets, 4000 in / 0 out bytes, unknown pkts/s, SYN ratio 0.988",
+        ])
         good = dict(explanation="The device made many connection attempts in a short time.",
                     recommended_action="Check whether someone was running an expected network check.")
         self.assertEqual(parse_alert_response(json.dumps(good), schema), good)
@@ -209,6 +209,7 @@ class ExplainTests(unittest.TestCase):
                 self.assertEqual(timing, dict(ttft_ms=250, total_latency_ms=750, tokens_per_sec=8))
                 chat = runner.generate.call_args.args[0]
                 self.assertTrue(chat.startswith("<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"))
+                self.assertIn('"explanation" and "recommended_action". Never echo the input fields.', chat)
                 self.assertIn("<|start_header_id|>user<|end_header_id|>\n\n" + prompt + "<|eot_id|>", chat)
                 self.assertTrue(chat.endswith("<|start_header_id|>assistant<|end_header_id|>\n\n"))
             self.assertEqual(runner.reset.call_count, 2)

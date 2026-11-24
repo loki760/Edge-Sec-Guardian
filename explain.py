@@ -60,6 +60,10 @@ def nonnegative_number(value):
     return None
 
 
+def evidence_number(value):
+    return "unknown" if value is None else f"{value:.3f}".rstrip("0").rstrip(".")
+
+
 def build_alert_prompt(flow):
     """Return a short prompt and text schema using only detector evidence."""
     level = str(flow.get("risk_level", "")).title()
@@ -69,9 +73,10 @@ def build_alert_prompt(flow):
     signals = [name for name in ALERT_SIGNALS if name in flow.get("signals", ())]
     protocol = {1: "ICMP", 6: "TCP", 17: "UDP"}.get(nonnegative_number(features.get("PROTOCOL_NUM")))
     risk = nonnegative_number(flow.get("risk_score"))
-    evidence = dict(verdict="Flagged", risk_score=risk if risk is not None and risk <= 1 else None,
-                    risk_level=level, signals=signals, protocol=protocol)
-    evidence.update({name: nonnegative_number(features.get(name)) for name in ALERT_FEATURES})
+    risk = evidence_number(risk if risk is not None and risk <= 1 else None)
+    in_pkts, out_pkts, in_bytes, out_bytes, rate, syn = (
+        evidence_number(nonnegative_number(features.get(name))) for name in ALERT_FEATURES
+    )
     schema = dict(type="object", additionalProperties=False, required=list(ALERT_FIELDS),
                   properties={key: {"type": "string", "minLength": 1, "maxLength": ALERT_MAX_CHARS}
                               for key in ALERT_FIELDS})
@@ -81,11 +86,14 @@ def build_alert_prompt(flow):
         '"explanation" and "recommended_action". Write ONE complete plain-English sentence of '
         'at most 18 words in each. Describe what the detector noticed, using everyday words and '
         'only the evidence. Skip protocol abbreviations and never infer other devices, causes, or attacks. '
-        'Start the action with Check or Ask, and say what to verify. Suggest only checks or '
-        'temporary disconnection by hand after checking. Do not suggest commands, enforcement, or deletion.\n'
+        'Start the action with Check or Ask, and say what to verify. Suggest only review steps. '
+        'Do not suggest commands, enforcement, or deletion.\n'
         + (f"Use only this observation for the explanation: {rule_notes}\n" if rule_notes else "")
         + "Evidence:\n"
-        + json.dumps(evidence, allow_nan=False)
+        + f"Verdict: Flagged ({level}, score {risk})\n"
+        + f"Signals: {'; '.join(signals) or 'none'}\n"
+        + f"Traffic: {protocol or 'unknown'}, {in_pkts} in / {out_pkts} out packets, "
+          f"{in_bytes} in / {out_bytes} out bytes, {rate} pkts/s, SYN ratio {syn}"
     )
     return prompt, schema
 
@@ -254,7 +262,9 @@ class ExecuTorchExplainer:
             reset()
         chat = (
             "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-            "You are a calm network assistant. Output ONLY the raw JSON object starting with { and nothing else."
+            'Explain the alert in 1–2 plain-English sentences for a home or office user. '
+            'Give 1–2 safe, review-only next steps. Return only a JSON object with keys '
+            '"explanation" and "recommended_action". Never echo the input fields.'
             "<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n"
             + prompt + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
         )
