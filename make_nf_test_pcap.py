@@ -1,7 +1,7 @@
 """Write the deterministic, synthetic flow-contract fixture (no capture device needed)."""
 from pathlib import Path
 
-from scapy.all import Ether, IP, TCP, UDP, wrpcap
+from scapy.all import Ether, ICMP, IP, TCP, UDP, wrpcap
 
 
 def sample_packets():
@@ -11,11 +11,13 @@ def sample_packets():
         (.25, TCP, False, 1000, "A"), (.625, TCP, True, 1000, "A"),
         (1, TCP, False, 1000, "FA"), (2, UDP, False, 2000, ""),
         (2.25, UDP, False, 2000, ""), (18, UDP, False, 2000, ""),
+        (19, ICMP, False, 0, ""), (19, ICMP, True, 0, ""),
     ]:
         a = ("02:00:00:00:00:01", "192.0.2.1", port)
         b = ("02:00:00:00:00:02", "192.0.2.2", 443)
         src, dst = (b, a) if reverse else (a, b)
-        layer = proto(sport=src[2], dport=dst[2])
+        layer = (ICMP(type=0 if reverse else 8) if proto is ICMP
+                 else proto(sport=src[2], dport=dst[2]))
         if proto is TCP:
             layer.flags = flags
         packet = Ether(src=src[0], dst=dst[0]) / IP(src=src[1], dst=dst[1]) / layer

@@ -8,6 +8,7 @@ __pycache__/
 .ruff_cache/
 .cache/
 data/raw/
+data/processed/
 artifacts/
 *.csv
 !data/features.csv

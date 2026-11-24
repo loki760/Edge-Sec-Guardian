@@ -1,66 +1,41 @@
 # IPv4 flow feature contract
 
-The first observed packet defines forward (IN, SRC_TO_DST). A packet with swapped IPs and ports belongs to the reverse direction (OUT, DST_TO_SRC). The key includes the transport protocol. Only IPv4 with a directly decoded TCP or UDP header is eligible. IPv4 fragments are skipped.
+The first observed packet establishes the forward direction (IN or SRC_TO_DST). The flow key pairs the two IP/port endpoints in either order and includes the IP protocol. TCP and UDP use transport ports. ICMP uses zero for both ports and aggregates messages between the same two hosts. The engine skips fragmented IPv4 packets. Ethernet parsing supports VLAN tags and reads the outer IP header. The table gives the exact order of `MODEL_FEATURE_COLUMNS`.
 
-For a direction, let G be successive arrival-time differences in milliseconds **within that direction**. With zero or one packet, all four IAT values are 0.0. One gap has population standard deviation 0.0. Packet lengths use the IPv4 total length, including IP and transport headers and payload, excluding Ethernet and padding. Scapy's serialized IP length is used for constructed packets without a populated length field.
+| Feature(s), in order | Definition |
+|---|---|
+| PROTOCOL_NUM | 6 for TCP, 17 for UDP, 1 for ICMP |
+| IN_PKTS, OUT_PKTS | Forward and reverse packet counts |
+| IN_BYTES, OUT_BYTES | Forward and reverse sums of IPv4 total lengths, including IP/transport headers and payload, excluding Ethernet framing and padding |
+| FLOW_DURATION_MILLISECONDS | 1,000 × elapsed seconds between first and last packets |
+| PKTS_PER_SEC, BYTES_PER_SEC | Total packets and total IPv4 bytes divided by elapsed seconds. Both are zero for zero duration. |
+| IN_OUT_PKT_RATIO, IN_OUT_BYTE_RATIO | Forward count or bytes divided by the corresponding reverse value plus one |
+| PKT_LEN_MIN, PKT_LEN_MAX, PKT_LEN_MEAN, PKT_LEN_STD | Minimum, maximum, mean and population standard deviation of IPv4 lengths in both directions |
+| TTL_MEAN | Arithmetic mean of all outer IPv4 TTLs |
+| SYN_RATIO, ACK_RATIO, FIN_RATIO, RST_RATIO, PSH_RATIO, URG_RATIO | Fraction of all flow packets carrying the respective TCP flag. Each flag counts separately. UDP and ICMP have zero for each value. |
+| SRC_TO_DST_IAT_MIN, SRC_TO_DST_IAT_MAX, SRC_TO_DST_IAT_AVG, SRC_TO_DST_IAT_STDDEV | Minimum, maximum, mean and population standard deviation of the gaps in milliseconds between successive forward packets |
+| DST_TO_SRC_IAT_MIN, DST_TO_SRC_IAT_MAX, DST_TO_SRC_IAT_AVG, DST_TO_SRC_IAT_STDDEV | Same statistics for reverse packets |
 
-| Column in scorer order | Formula | Unit |
-|---|---|---|
-| IN_PKTS | Count forward packets | packets |
-| OUT_PKTS | Count reverse packets | packets |
-| IN_BYTES | Sum forward IP lengths | bytes |
-| OUT_BYTES | Sum reverse IP lengths | bytes |
-| FLOW_DURATION_MILLISECONDS | 1000 × (last timestamp − first timestamp), both directions | ms |
-| SRC_TO_DST_IAT_MIN | min(forward G) | ms |
-| SRC_TO_DST_IAT_MAX | max(forward G) | ms |
-| SRC_TO_DST_IAT_AVG | sum(forward G) / count(forward G) | ms |
-| SRC_TO_DST_IAT_STDDEV | √mean((forward gap − forward mean)²) | ms |
-| DST_TO_SRC_IAT_MIN | min(reverse G) | ms |
-| DST_TO_SRC_IAT_MAX | max(reverse G) | ms |
-| DST_TO_SRC_IAT_AVG | sum(reverse G) / count(reverse G) | ms |
-| DST_TO_SRC_IAT_STDDEV | √mean((reverse gap − reverse mean)²) | ms |
+With fewer than two packets in a direction, all four gap values are zero. A single gap has zero standard deviation. Online population moments keep constant memory per open flow. The capture clock uses Unix seconds, clamps backward arrivals to the latest seen timestamp, and retains floating-point precision for feature values.
 
-Timestamps use Unix seconds. The capture clock advances in arrival order and clamps backward timestamps to the latest observed time. Output millisecond fields are rounded to three decimal places after aggregation. Directional moments use bounded batches and population standard deviation.
+## Flow lifecycle and interfaces
 
-## Lifecycle and integration
+Before processing a packet the engine expires flows idle for at least 15 seconds or open for at least 60 seconds. The earlier deadline determines the reason, with active expiry winning ties. Live capture checks the clock during silence every half second. FIN or RST is counted and closes a TCP flow immediately. At 2,000 open flows a new key evicts the earliest-created flow. Reuse of a closed key starts a new flow. EOF and interruption flush open flows. The extractor CLI supports `--idle-timeout`, `--active-timeout` and `--max-open-flows`.
 
-Before processing each packet, expire flows whose idle time reaches 15 seconds or whose age reaches 60 seconds. The earlier deadline determines the reason, with active expiry winning ties. Live capture also checks the clock during silence, roughly every half second. Replay advances on capture timestamps. FIN or RST is counted and closes the flow immediately. At the 2,000-flow cap, a new key evicts the earliest-created open flow. The next packet after closure starts a fresh flow, even for the same key. EOF or interruption flushes outstanding flows. The extractor CLI accepts --idle-timeout and --active-timeout in seconds and --max-open-flows as a count.
+`iter_pcap_flows(path, engine=None, stop=None, max_packets=None, max_flows=None, stats=None)` yields dictionaries with separate `features` and `metadata` fields. `stream_live_flows(interface, on_flow, engine=None, stop=None)` calls the callback with the same structure. Metadata contains src_ip, dst_ip, src_port, dst_port, protocol, flow_start_ts, flow_end_ts, emit_reason and emit_delay_ms. Delay measures capture-clock milliseconds from the last packet until emission. The extractor CSV flattens metadata followed by the 29 features. Packet payload, IP addresses, ports, filenames, timestamps and capture labels never enter the predictor vector.
 
-Each row from `iter_pcap_flows(path, engine=None)` or callback to `stream_live_flows(interface, on_flow, engine=None, stop=None)` has separate `features` and `metadata` dictionaries. Metadata contains src_ip, dst_ip, src_port, dst_port, protocol, flow_start_ts, flow_end_ts, emit_reason, and emit_delay_ms (capture-clock milliseconds since the last packet at emission). The CSV flattens metadata first, then the ordered features. The scorer gets only the numeric dictionary. No packet payload is retained.
+The engine reports packets_seen, packets_skipped, packets_dropped, flows_emitted, open_flows, packets_per_sec and avg_emit_delay_ms. Throughput averages all packets over elapsed processing time. Drops come from Linux AF_PACKET capture statistics when available. File replay and unsupported capture backends report null.
 
-Pass a FlowEngine instance to read its counters. Packets/sec is average throughput since capture or replay-pass start, including configured replay pauses. Skipped counts unsupported packets delivered to the engine. Dropped counts kernel-reported capture socket drops on Linux AF_PACKET when available. PCAP replay and unsupported backends report null (N/A). Offline mode means local capture, storage, and scoring with no external service. It does not measure internet connectivity.
+## Building capture-labelled data
 
-`Dashboard(db_path, scorer=callable, scoring="Model name")` accepts a scorer returning a dictionary with verdict. Use "Flagged" to persist an alert and supply severity, signals (list of strings), and explanation (string). Supply a descriptive scoring label for display. The default verdict is "Unscored". With --demo-rules, three forward packets or 100 forward bytes triggers a demonstration alert. The existing 42-feature classifier has a separate input contract.
+`build_ciciot_dataset.py` recursively reads PCAP/PCAPNG files and writes source_pcap (path relative to the input root), flow_start_ts, attack_family, label and the ordered features. Known CIC-IoT-2023 names identify one of Benign, BruteForce, DDoS, DoS, Mirai, Recon, Spoofing and Web-based. A recognized filename and parent folder pointing to different families cause an error. For renamed or ambiguous files, supply a JSON object with exact relative paths using forward slashes, e.g. `{"lab/a.pcap":{"attack_family":"Recon","label":1}}`. Labels describe capture membership. Benign traffic inside attack captures can inherit an attack label.
 
-## To Confirm Against `expt/nf-ton-iot-v3`
-
-- IP total length versus link-layer or captured length, including truncation and fragments.
-- First-observed direction versus initiator/exporter alignment for IN and OUT.
-- Millisecond precision, intermediate rounding, and out-of-order handling.
-- Population versus sample deviation, per-direction gap definition, and missing-gap values.
-- Idle/active limits, equality at deadlines, and FIN/RST closure semantics.
-
-## Run from the repository root
-
-Windows PowerShell, using the project virtual environment:
+The default prefix limits are 250,000 packets and 15,000 written flows per file. The reader stops before requesting another packet when either limit is reached. Open flows are finalized at the boundary. The flow limit also applies to flushed output. A neighboring `.manifest.json` records the limits, read and write counts, stop reason, and number of finalized flows beyond the write limit. Capture prefixes may underrepresent later traffic.
 
 ```powershell
-.\.venv\Scripts\python.exe nf_flow_extractor.py --pcap data/nf_test_sample.pcap --output data/nf_flows.csv
-.\.venv\Scripts\python.exe dashboard.py --replay-pcap data/nf_test_sample.pcap --interval 1 --loop --demo-rules
+.\.venv\Scripts\python.exe make_nf_test_pcap.py
+.\.venv\Scripts\python.exe nf_flow_extractor.py --pcap data/nf_test_sample.pcap --output data/nf_test_features.csv
+.\.venv\Scripts\python.exe build_ciciot_dataset.py --pcap-dir data/raw/ciciot2023 --output data/processed/ciciot_flows.csv --max-flows-per-file 15000 --max-packets-per-file 250000
 ```
 
-Linux, using a Python environment with Scapy:
-
-```sh
-python3 nf_flow_extractor.py --pcap data/nf_test_sample.pcap --output data/nf_flows.csv
-python3 dashboard.py --replay-pcap data/nf_test_sample.pcap --interval 1 --demo-rules
-```
-
-Raspberry Pi 5, using the interface that carries the traffic and an interpreter with Scapy installed:
-
-```sh
-sudo "$(command -v python3)" nf_flow_extractor.py --interface wlan0
-sudo "$(command -v python3)" dashboard.py --interface wlan0 --host 0.0.0.0 --port 8080 --demo-rules
-```
-
-Open `http://localhost:8080` on the host or `http://<host-ip>:8080` on the same trusted LAN. The host firewall must permit the latter connection. Anyone with access can read endpoints and submit feedback. The dashboard keeps the latest 50 completed flows in memory and displays the latest 50 persisted alerts. Confirm/Dismiss updates survive restarts in artifacts/alerts.db. Omit --loop to finish after one pass and leave the results available. Ctrl+C stops the server. The included capture is a deterministic synthetic fixture. Regenerate it with `python make_nf_test_pcap.py`.
+The included ten-packet capture is synthetic. It exercises TCP, UDP and ICMP without a live capture device.

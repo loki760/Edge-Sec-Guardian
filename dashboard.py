@@ -13,8 +13,10 @@ import threading
 from urllib.parse import urlsplit
 
 from scapy.error import Scapy_Exception
+from threadpoolctl import threadpool_limits
 
 from nf_flow_extractor import FlowEngine, iter_pcap_flows, stream_live_flows
+from risk_fusion import RiskFusionScorer, load_ciciot_bundle
 
 try:
     import psutil
@@ -85,7 +87,10 @@ class Dashboard:
                 CHECK(feedback IN ('confirmed', 'dismissed')))""")
 
     def accept(self, row):
-        score = self.scorer(dict(row["features"])) if self.scorer else {"verdict": "Unscored"}
+        if isinstance(self.scorer, RiskFusionScorer):
+            score = self.scorer(dict(row["features"]), dict(row["metadata"]))
+        else:
+            score = self.scorer(dict(row["features"])) if self.scorer else {"verdict": "Unscored"}
         flow = {**row, **score, "scoring": self.scoring}
         with self.lock:
             if score["verdict"] == "Flagged":
@@ -160,6 +165,14 @@ def make_server(host, port, state):
 
 
 def capture(args, state, stop):
+    if isinstance(state.scorer, RiskFusionScorer) and state.scorer.bundle is not None:
+        # One completed flow per prediction. Parallel OpenMP setup adds latency here.
+        with threadpool_limits(limits=1, user_api="openmp"):
+            return capture_flows(args, state, stop)
+    return capture_flows(args, state, stop)
+
+
+def capture_flows(args, state, stop):
     try:
         if args.interface:
             state.status = "Capturing"
@@ -167,6 +180,8 @@ def capture(args, state, stop):
         else:
             while not stop.is_set():
                 state.engine = FlowEngine()
+                if isinstance(state.scorer, RiskFusionScorer):
+                    state.scorer.reset()
                 state.status = "Replaying"
                 for flow in iter_pcap_flows(args.replay_pcap, state.engine, stop):
                     state.accept(flow)
@@ -188,12 +203,21 @@ def main():
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--interval", type=float, default=1.0, help="Seconds between replayed rows")
     parser.add_argument("--loop", action="store_true", help="Repeat PCAP replay")
-    parser.add_argument("--demo-rules", action="store_true")
+    scoring = parser.add_mutually_exclusive_group()
+    scoring.add_argument("--demo-rules", action="store_true")
+    scoring.add_argument("--model", help="Trusted CIC model bundle; enables ML and traffic rules")
     args = parser.parse_args()
     if not math.isfinite(args.interval) or args.interval < 0 or (args.loop and args.interface):
         parser.error("Use a finite nonnegative interval and --loop only with replay")
-    state = Dashboard(ROOT / "artifacts/alerts.db", demo_score if args.demo_rules else None,
-                      "Demo rules" if args.demo_rules else "Unscored")
+    scorer = demo_score if args.demo_rules else None
+    mode = "Demo rules" if args.demo_rules else "Unscored"
+    if args.model:
+        try:
+            scorer = RiskFusionScorer(load_ciciot_bundle(args.model))
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+        mode = "CIC model + traffic rules"
+    state = Dashboard(ROOT / "artifacts/alerts.db", scorer, mode)
     stop = threading.Event()
     with make_server(args.host, args.port, state) as server:
         worker = threading.Thread(target=capture, args=(args, state, stop))

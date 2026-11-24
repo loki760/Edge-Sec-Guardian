@@ -21,7 +21,7 @@ td.flag{color:#f5ce87}.empty{padding:14px 0;color:#adc1b8}#banner[hidden]{displa
 <main><div class="heading"><h1>Traffic monitor</h1><span class="sub" id="mode"></span></div>
 <section><h2>Real-time device benchmarks</h2><dl id="metrics"></dl></section>
 <section><h2>Live alerts</h2><p id="banner" role="status" hidden></p><div id="alerts"></div></section>
-<section><h2>Live traffic</h2><div class="scroll"><table><thead><tr><th>Flow start</th><th>Source → destination</th><th>Protocol</th><th>Packets in / out</th><th>Bytes in / out</th><th>Duration (ms)</th><th>Verdict</th></tr></thead><tbody id="traffic"></tbody></table></div><p id="empty" class="empty">Waiting for completed flows.</p></section>
+<section><h2>Live traffic</h2><div class="scroll"><table><thead><tr><th>Flow start</th><th>Source → destination</th><th>Protocol</th><th>Packets in / out</th><th>Bytes in / out</th><th>Duration (ms)</th><th>Verdict</th><th>Attack probability</th><th>Risk score</th><th>Risk level</th><th>Signals</th><th>Detector (ms)</th></tr></thead><tbody id="traffic"></tbody></table></div><p id="empty" class="empty">Waiting for completed flows.</p></section>
 </main><script>
 const byId = id => document.getElementById(id);
 function node(tag, value, cls) {
@@ -51,7 +51,7 @@ function renderAlerts(alerts) {
   alertVersion = version;
   const cards = alerts.map(a => {
     const card = node('article', null, 'alert'), head = node('div', null, 'alert-head');
-    head.append(node('strong', endpoint(a.metadata)), node('span', a.severity, 'badge'));
+    head.append(node('strong', endpoint(a.metadata)), node('span', a.risk_level || a.severity, 'badge'));
     card.append(head, node('small', a.scoring + ' · ' + new Date(a.metadata.flow_start_ts*1000).toLocaleString()));
     const signals = node('ul');
     a.signals.forEach(s => signals.append(node('li', s)));
@@ -91,7 +91,10 @@ async function refresh() {
     byId('traffic').replaceChildren(...s.traffic.map(r => {
       const tr = node('tr'), m = r.metadata, f = r.features;
       for (const value of [new Date(m.flow_start_ts*1000).toLocaleString(),endpoint(m),m.protocol,
-        f.IN_PKTS+' / '+f.OUT_PKTS,f.IN_BYTES+' / '+f.OUT_BYTES,f.FLOW_DURATION_MILLISECONDS,r.verdict])
+        f.IN_PKTS+' / '+f.OUT_PKTS,f.IN_BYTES+' / '+f.OUT_BYTES,f.FLOW_DURATION_MILLISECONDS,r.verdict,
+        r.ml_probability == null ? '—' : (100*r.ml_probability).toFixed(1)+'%',
+        r.risk_score == null ? '—' : r.risk_score.toFixed(3),r.risk_level || '—',
+        (r.signals || []).join(' · ') || '—',r.detector_ms == null ? '—' : r.detector_ms.toFixed(2)])
         tr.append(node('td',value,value === 'Flagged' ? 'flag' : ''));
       return tr;
     }));

@@ -5,7 +5,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from scapy.all import TCP, wrpcap
+from scapy.all import IP, Raw, TCP, wrpcap
+from scapy.utils import PcapNgWriter
+
+from build_ciciot_dataset import capture_label
 
 from make_nf_test_pcap import sample_packets
 from nf_flow_extractor import FEATURE_COLUMNS, FlowEngine, iter_pcap_flows, stream_live_flows
@@ -16,16 +19,77 @@ class FlowTests(unittest.TestCase):
         engine = FlowEngine()
         rows = list(iter_pcap_flows(Path(__file__).parent / "data/nf_test_sample.pcap", engine))
         expected = [
-            [3, 2, 120, 80, 1000, 250, 750, 500, 250, 500, 500, 500, 0],
-            [2, 0, 56, 0, 250, 250, 250, 250, 0, 0, 0, 0, 0],
-            [1, 0, 28, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [6, 3, 2, 120, 80, 1000, 5, 200, 1, 120/81, 40, 40, 40, 0, 64,
+             .4, .8, .2, 0, 0, 0, 250, 750, 500, 250, 500, 500, 500, 0],
+            [17, 2, 0, 56, 0, 250, 8, 224, 2, 56, 28, 28, 28, 0, 64,
+             0, 0, 0, 0, 0, 0, 250, 250, 250, 0, 0, 0, 0, 0],
+            [17, 1, 0, 28, 0, 0, 0, 0, 1, 28, 28, 28, 28, 0, 64] + [0] * 14,
+            [1, 1, 1, 28, 28, 0, 0, 0, .5, 28/29, 28, 28, 28, 0, 64] + [0] * 14,
         ]
         self.assertEqual([row["features"] for row in rows],
                          [dict(zip(FEATURE_COLUMNS, values)) for values in expected])
-        self.assertEqual([r["metadata"]["emit_reason"] for r in rows], ["fin", "idle_timeout", "eof"])
+        self.assertEqual([r["metadata"]["emit_reason"] for r in rows], ["fin", "idle_timeout", "eof", "eof"])
         self.assertEqual(rows[1]["metadata"]["emit_delay_ms"], 15750)
-        self.assertEqual(engine.counters()["packets_seen"], 8)
+        self.assertEqual(engine.counters()["packets_seen"], 10)
         self.assertEqual(engine.counters()["open_flows"], 0)
+
+    def test_varied_lengths_ttl_and_flags(self):
+        first, second = sample_packets()[:2]
+        second = second / Raw(b"x" * 20)
+        second[IP].ttl = 32
+        second[TCP].flags = "RPU"
+        engine = FlowEngine()
+        list(engine.feed(first))
+        row, = engine.feed(second)
+        x = row["features"]
+        self.assertEqual([x[k] for k in ("PKT_LEN_MIN", "PKT_LEN_MAX", "PKT_LEN_MEAN",
+                                         "PKT_LEN_STD", "TTL_MEAN")], [40, 60, 50, 10, 48])
+        self.assertEqual([x[k] for k in ("SYN_RATIO", "RST_RATIO", "PSH_RATIO", "URG_RATIO")],
+                         [.5] * 4)
+
+    def test_live_offline_and_pcapng_equivalence(self):
+        path = Path(__file__).parent / "data/nf_test_sample.pcap"
+        expected = list(iter_pcap_flows(path))
+        stop = threading.Event()
+        packets = sample_packets()
+        def feed_all(**options):
+            for packet in packets:
+                options["prn"](packet)
+            stop.set()
+        live = []
+        with patch("nf_flow_extractor.conf.L2listen", return_value=Mock(closed=False)), \
+             patch("nf_flow_extractor.sniff", side_effect=feed_all), \
+             patch("nf_flow_extractor.time.time", return_value=float(packets[-1].time)):
+            stream_live_flows("fixture", live.append, stop=stop)
+        self.assertEqual([r["features"] for r in live], [r["features"] for r in expected])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.pcapng"
+            with PcapNgWriter(str(path)) as writer:
+                for packet in packets:
+                    writer.write(packet)
+            self.assertEqual(list(iter_pcap_flows(path)), expected)
+
+    def test_caps_stop_reader_and_flush(self):
+        path = Path(__file__).parent / "data/nf_test_sample.pcap"
+        for caps, seen, reason in [({"max_flows": 1}, 5, "flow_cap"),
+                                    ({"max_packets": 2}, 2, "packet_cap")]:
+            stats, engine = {}, FlowEngine()
+            rows = list(iter_pcap_flows(path, engine, stats=stats, **caps))
+            self.assertEqual(stats["reason"], reason)
+            self.assertEqual(stats["packets_read"], seen)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(engine.counters()["open_flows"], 0)
+            if reason == "packet_cap":
+                self.assertEqual(rows[0]["metadata"]["emit_reason"], reason)
+                self.assertEqual(rows[0]["features"]["OUT_PKTS"], 1)
+
+    def test_label_map_and_ambiguous_names(self):
+        path = Path("BenignTraffic1") / "DDoS-ICMP_Flood.pcap"
+        for unknown in [path, Path("mystery.pcap")]:
+            with self.assertRaisesRegex(ValueError, "Unknown or ambiguous"):
+                capture_label(unknown, {})
+        self.assertEqual(capture_label(path, {path.as_posix(): {"attack_family": "DDoS", "label": 1}}),
+                         ("DDoS", 1))
 
     def test_unrelated_tail_does_not_change_finalized_row(self):
         packets = sample_packets()
