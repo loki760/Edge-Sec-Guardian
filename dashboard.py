@@ -3,12 +3,14 @@ import argparse
 from collections import OrderedDict, deque
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import IPv4Address
 import json
 import math
 from pathlib import Path
-from queue import Queue
+from queue import Full, Queue
 import re
 import sqlite3
+import socket
 import sys
 import threading
 from time import monotonic, perf_counter
@@ -30,6 +32,7 @@ ROOT = Path(__file__).resolve().parent
 EXPLANATION_LEVELS = {"high": 2, "medium": 1}
 EXPLANATION_CACHE_SIZE = 512
 DEFAULT_EXPLANATION_COOLDOWN = 30.0
+LIVE_FLOW_QUEUE_CAPACITY = 4096
 
 
 def alert_details(flow):
@@ -358,18 +361,51 @@ def make_server(host, port, state):
 
 
 def capture(args, state, stop):
-    if isinstance(state.scorer, RiskFusionScorer) and state.scorer.bundle is not None:
+    if not args.interface and isinstance(state.scorer, RiskFusionScorer) and state.scorer.bundle is not None:
         # One completed flow per prediction. Parallel OpenMP setup adds latency here.
         with threadpool_limits(limits=1, user_api="openmp"):
             return capture_flows(args, state, stop)
     return capture_flows(args, state, stop)
 
 
+def capture_live(interface, state, stop):
+    rows = Queue(maxsize=LIVE_FLOW_QUEUE_CAPACITY)
+    errors = []
+
+    def submit(row):
+        try:
+            rows.put_nowait(row)
+        except Full:
+            state.engine.flows_dropped += 1
+
+    def score_rows():
+        # OpenMP limits apply on the thread that calls the detector.
+        with threadpool_limits(limits=1, user_api="openmp"):
+            while (row := rows.get()) is not None:
+                if errors:
+                    continue
+                try:
+                    state.accept(row)
+                except Exception as error:
+                    errors.append(error)
+                    stop.set()
+
+    worker = threading.Thread(target=score_rows, name="live-flow-scoring")
+    worker.start()
+    try:
+        stream_live_flows(interface, submit, state.engine, stop)
+    finally:
+        rows.put(None)
+        worker.join()
+    if errors:
+        raise errors[0]
+
+
 def capture_flows(args, state, stop):
     try:
         if args.interface:
             state.status = "Capturing"
-            stream_live_flows(args.interface, state.accept, state.engine, stop)
+            capture_live(args.interface, state, stop)
         else:
             while not stop.is_set():
                 state.engine = FlowEngine()
@@ -387,6 +423,14 @@ def capture_flows(args, state, stop):
         print(state.status, file=sys.stderr)
 
 
+def management_ips(interface, configured):
+    addresses = set(configured)
+    if interface and psutil:
+        addresses.update(info.address for infos in psutil.net_if_addrs().values()
+                         for info in infos if info.family == socket.AF_INET)
+    return addresses
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
@@ -394,6 +438,8 @@ def main():
     group.add_argument("--interface")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--management-ip", type=IPv4Address, action="append", default=[],
+                        help="Additional local IPv4 address for SSH and dashboard exclusions")
     parser.add_argument("--interval", type=float, default=1.0, help="Seconds between replayed rows")
     parser.add_argument("--loop", action="store_true", help="Repeat PCAP replay")
     scoring = parser.add_mutually_exclusive_group()
@@ -416,7 +462,9 @@ def main():
     mode = "Demo rules" if args.demo_rules else "Unscored"
     if args.model:
         try:
-            scorer = RiskFusionScorer(load_ciciot_bundle(args.model))
+            scorer = RiskFusionScorer(load_ciciot_bundle(args.model),
+                                      management_ips=management_ips(args.interface, args.management_ip),
+                                      dashboard_port=args.port)
         except (OSError, ValueError) as exc:
             parser.error(str(exc))
         mode = "CIC model + traffic rules"

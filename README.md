@@ -1,244 +1,57 @@
 # Edge-Sec-Guardian
 
-Offline binary intrusion classification for UNSW-NB15 CSV records: a saved
-Random Forest pipeline predicts `normal` or `attack`, and optional native Ollama
-`llama3.2:1b` summarizes that result in the terminal. The Python container targets
-Linux ARM64 on a MacBook Pro M1. Training and prediction use local files;
-explanations use local HTTP. Internet access is needed for setup downloads only.
+Edge-Sec-Guardian is the Phase 1 submission for Bharat AI-SoC Challenge Problem Statement 3, Option C. It detects suspicious IPv4 flows on a Raspberry Pi 5 and shows alerts in a local dashboard. A 29-feature Histogram Gradient Boosting model and network rules make the detection decision. An optional local ExecuTorch Llama worker explains High alerts for review. The installed system can run without internet access.
 
-## Verified baseline
+- [Engineering report](ENGINEERING_REPORT.md)
+- [Architecture](ARCHITECTURE.md) and [feature contract](FEATURE_CONTRACT.md)
+- [Physical Pi benchmarks and inline stress test](reports/benchmarks/)
+- [Dataset, training and evaluation guide](CIC_IOT_PIPELINE.md)
 
-The complete pipeline is integrated on `feat/baseline-mvp`: official UNSW-NB15
-CSV → preprocessing → Random Forest → optional local Llama 3.2 1B → CLI.
-All **58 tests pass in ARM64 Docker**. Training used 175,341 official training
-records; evaluation used the separate 82,332-record held-out test split.
+## Install on Raspberry Pi 5
 
-| Held-out metric | Value |
-| --- | ---: |
-| Accuracy | 0.870670 |
-| Attack precision | 0.817352 |
-| Attack recall | 0.985286 |
-| Attack F1 | 0.893497 |
-| False-positive rate | 26.98% |
+The recorded configuration uses 64-bit ARM Linux, Python 3.13.5, scikit-learn 1.9.1, and ExecuTorch 1.6.0. Run `bash scripts/setup_pi5.sh` from a source checkout to provision core dependencies. For a wheel-only installation, prepare the virtual environment and its dependencies separately. Stage the following files inside your project directory:
 
-The confusion matrix is `[[27019, 9981], [667, 44665]]` (rows: actual normal,
-attack; columns: predicted normal, attack). There are **9,981 false positives
-among 37,000 benign test records**. This substantial false-positive rate is a
-baseline limitation; benchmark results do not establish live-network performance.
+- `edge_sec_guardian-0.1.0-py3-none-any.whl`
+- `artifacts/ciciot_model.pkl`, a trusted bundle trained with scikit-learn 1.9.1
+- For explanations, `models/Llama-3.2-1B-Instruct-SpinQuant_INT4_EO8.pte` and its matching `models/tokenizer.model`, plus an ARM64 ExecuTorch installation with the LLM runner bindings
 
-Docker prediction on test row 0 returned `attack` with score `0.7849`, and a real
-local Llama explanation was generated from that prediction. Dataset files and
-trained artifacts remain local and are not included in Git. See
-[data/README.md](data/README.md) for acquisition, verified hashes, attribution,
-and source details still requiring user confirmation.
-
-## Native Python setup
-
-Use Python 3.11–3.14; Docker below supplies Python 3.13. From the repository root:
+Build a wheel from the repository with `python -m pip wheel --no-deps --wheel-dir artifacts/wheels .`. With dependencies and model files staged, install the wheel on the Pi from the local directory:
 
 ```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m unittest -v
+.venv/bin/python -m pip install --no-index --no-deps ./edge_sec_guardian-0.1.0-py3-none-any.whl
 ```
 
-Direct dependencies are Scapy 2.6.1 (legacy utility), pandas 3.1.1 and
-scikit-learn 1.9.1. Use the same pins for training and prediction; the artifact
-records the exact scikit-learn version, and incompatible artifacts are rejected.
-Only load trusted project-generated pickle files.
+## Run offline
 
-Download the original named splits from the official UNSW collection using the
-procedure in [data/README.md](data/README.md). Preserve their bytes and membership;
-place them under `data/raw/`, then verify them:
+Start with a local capture file. Open `http://127.0.0.1:8080` on the Pi or use SSH port forwarding.
 
 ```sh
-mkdir -p data/raw artifacts
-python download_data.py
+.venv/bin/edge-sec-dashboard --replay-pcap data/nf_test_sample.pcap \
+  --model artifacts/ciciot_model.pkl --host 127.0.0.1 --interval 0
 ```
 
-To reproduce the baseline, train and evaluate on the official splits. If a trusted
-model already exists, skip training and run prediction:
+For live capture on an authorized gateway or mirror interface, use its LAN-facing interface name. Raw capture requires elevated network permissions. In this example the interface is `eth0`.
 
 ```sh
-python train_model.py \
-  --train data/raw/UNSW_NB15_training-set.csv \
-  --test data/raw/UNSW_NB15_testing-set.csv \
-  --model artifacts/model.pkl --metrics artifacts/metrics.json
-python cli.py --input data/raw/UNSW_NB15_testing-set.csv --row 0
+sudo .venv/bin/edge-sec-dashboard --interface eth0 --host 127.0.0.1 \
+  --alerts-db artifacts/alerts.db --model artifacts/ciciot_model.pkl \
+  --explainer executorch \
+  --llama-model models/Llama-3.2-1B-Instruct-SpinQuant_INT4_EO8.pte \
+  --llama-tokenizer models/tokenizer.model
 ```
 
-The full training split alone fits preprocessing and the forest. The unchanged
-test split is evaluation-only. The pipeline and measured metrics persist under
-`artifacts/`. No accuracy target or demonstration score is hard-coded.
+Use `--explainer none` for detection alone. See `edge-sec-benchmark --help` for PCAP replay and timed live measurements. The dashboard stores alerts and Confirm/Dismiss feedback in local SQLite. Network endpoints are retained in that database, so keep it private.
 
-## One-record CLI
+## Verified results
 
-```sh
-python cli.py --input data/raw/UNSW_NB15_testing-set.csv
-python cli.py --input data/raw/UNSW_NB15_testing-set.csv --row 10 --model artifacts/model.pkl
-python cli.py --input data/raw/UNSW_NB15_testing-set.csv --row 10 --explain
-python cli.py --help
-```
+| Physical Pi benchmark | Packets/s | Detector p95 | Llama p50 TTFT | Llama p50 decode | Peak RSS | Peak CPU temperature |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| [Fast path PCAP replay](reports/benchmarks/benchmark_pi5_fast.md) | 758.82 | 3.86 ms | — | — | 226.16 MB | 52.35 °C |
+| [ExecuTorch PCAP replay](reports/benchmarks/benchmark_pi5_executorch.md) | 212.69 | 27.29 ms | 1.96 s | 12.23 tokens/s | 2,355.31 MB | 68.30 °C |
+| [15-minute live capture](reports/benchmarks/benchmark_pi5_sustained_15m.md) | 2.43 | 27.68 ms | 2.14 s | 12.01 tokens/s | 2,651.52 MB | 61.15 °C |
 
-`--input` is required. `--row` defaults to zero and counts data rows, excluding
-the header. Only one row is predicted. The shared loader validates the whole CSV;
-an invalid unselected row also causes rejection. Negative or out-of-range indices,
-missing files and invalid schemas fail clearly. `--model` defaults to
-`artifacts/model.pkl`. `--explain` is off by default; ML-only operation needs no
-Ollama service. `--ollama-url` defaults to `http://localhost:11434` and is used
-only with `--explain`.
+The 15-minute run used live Ethernet and local inference. All three runs reported `throttled=0x0` at the start and end. The separate inline Chrome and YouTube rerun reported zero kernel packet drops, zero scoring-queue drops and 13 ML-only High alerts among 4,727 observed scored flows. Site attribution for those 13 records was unavailable. [Inline comparison](reports/benchmarks/inline_stress_comparison.md)
 
-Input must contain all 42 UNSW features. Optional `id`, `attack_cat` and `label`
-columns are ignored during prediction and excluded from LLM input. Missing,
-duplicate or unexpected columns and invalid values are rejected. The legacy
-16-feature PCAP CSV is incompatible; there is no feature mapping or zero filling.
+The deployed classifier measured 99.6575% precision, 48.1708% recall and 0.1506% FPR on its labeled holdout. The [Engineering Report](ENGINEERING_REPORT.md) gives split membership, threshold selection, per-family recall and limitations.
 
-Stdout contains `Row`, `Prediction` (including numeric label), and
-`Attack probability` rounded to four decimals. With `--explain`, `Explanation`
-contains the actual local response. Probability is an uncalibrated model score.
-Generated prose summarizes supplied values; it is not proof of the forest's
-reasoning and cannot change the classification.
-
-Exit codes: `0` for success, `1` for file/schema/model/runtime errors, `2` for
-argparse usage errors. If explanation generation fails, the prediction remains
-on stdout, `Explanation unavailable: <reason>` goes to stderr, and exit status
-is `1`. No fallback explanation is printed.
-
-## ARM64 Docker setup
-
-Start [Docker Desktop](https://docs.docker.com/desktop/) on the Mac. Build and test:
-
-```sh
-docker build --platform linux/arm64 -t edge-sec-guardian:cli .
-docker run --rm --platform linux/arm64 --network none \
-  edge-sec-guardian:cli python -m unittest -v
-```
-
-The image retains `python:3.13-slim-trixie`, runs as a non-root user (UID 1000),
-and defaults to CLI help. The build context admits only application modules,
-tests, requirements and the two legacy sample files. It excludes datasets,
-artifacts, credentials, Git history and caches. Rebuild after changing source or
-dependencies. The base image tag and transitive dependencies are not fully pinned,
-so future rebuilds may differ from the verified environment.
-
-Use bind mounts for local data and persistent model output. Create host
-directories first. Matching your host UID/GID prevents root-owned output files:
-
-```sh
-mkdir -p data/raw artifacts
-docker run --rm --platform linux/arm64 --network none \
-  --user "$(id -u):$(id -g)" \
-  --mount "type=bind,source=$(pwd)/data,target=/app/data,readonly" \
-  --mount "type=bind,source=$(pwd)/artifacts,target=/app/artifacts" \
-  edge-sec-guardian:cli python train_model.py \
-  --train data/raw/UNSW_NB15_training-set.csv \
-  --test data/raw/UNSW_NB15_testing-set.csv \
-  --model artifacts/model.pkl --metrics artifacts/metrics.json
-
-docker run --rm --platform linux/arm64 --network none \
-  --user "$(id -u):$(id -g)" \
-  --mount "type=bind,source=$(pwd)/data,target=/app/data,readonly" \
-  --mount "type=bind,source=$(pwd)/artifacts,target=/app/artifacts,readonly" \
-  edge-sec-guardian:cli python cli.py \
-  --input data/raw/UNSW_NB15_testing-set.csv --row 0
-```
-
-Place the official CSVs locally before training; prediction requires the saved
-model. These commands disable network access for training and ML-only prediction.
-To verify manually placed downloads inside Docker, mount the repository writable
-(the verifier updates `data/README.md`):
-
-```sh
-docker run --rm --platform linux/arm64 --network none \
-  --user "$(id -u):$(id -g)" \
-  --mount "type=bind,source=$(pwd),target=/app" \
-  edge-sec-guardian:cli python download_data.py
-```
-
-## Native Ollama from Docker
-
-Install and run Ollama natively on macOS using [OLLAMA.md](OLLAMA.md). Download
-the exact model once during setup:
-
-```sh
-ollama pull llama3.2:1b
-ollama list
-```
-
-For CLI-only Ollama, start the server in another terminal with a loopback bind:
-
-```sh
-OLLAMA_HOST=127.0.0.1:11434 ollama serve
-```
-
-If the Ollama application is already serving that port, use its existing service.
-Ollama's default bind is loopback, as described in its
-[configuration documentation](https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network).
-On this Mac, Docker Desktop successfully reached the native service at
-`127.0.0.1:11434` through `host.docker.internal`; no wildcard bind or persistent
-macOS setting change was needed. Container localhost refers to the container.
-See [Docker's host service instructions](https://docs.docker.com/desktop/features/networking/#i-want-to-connect-from-a-container-to-a-service-on-the-host).
-
-Check connectivity and the installed exact model from the application image:
-
-```sh
-docker run --rm --platform linux/arm64 edge-sec-guardian:cli \
-  python -c 'import json; from urllib.request import build_opener, ProxyHandler; result = json.loads(build_opener(ProxyHandler({})).open("http://host.docker.internal:11434/api/tags", timeout=10).read()); print([model["name"] for model in result["models"]])'
-```
-
-With the saved model and native Ollama service available, request an explanation:
-
-```sh
-docker run --rm --platform linux/arm64 \
-  --user "$(id -u):$(id -g)" \
-  --mount "type=bind,source=$(pwd)/data,target=/app/data,readonly" \
-  --mount "type=bind,source=$(pwd)/artifacts,target=/app/artifacts,readonly" \
-  edge-sec-guardian:cli python cli.py \
-  --input data/raw/UNSW_NB15_testing-set.csv --row 0 --explain \
-  --ollama-url http://host.docker.internal:11434
-```
-
-Keep Docker networking enabled for local HTTP. `--network none` also blocks
-host Ollama. After setup, disconnect external internet while retaining local
-connectivity to verify offline explanation operation. If connection fails,
-check that Ollama is serving, Docker Desktop is running, the URL uses
-`host.docker.internal`, and local firewall rules permit Docker Desktop access.
-No port publication, Ollama container, Compose stack or cloud inference is needed.
-
-## Separate legacy PCAP utility
-
-The retained Scapy utility groups bidirectional IPv4 TCP/UDP packets into flows
-and exports 16 numeric features with five identifiers. It is separate from the
-42-feature UNSW classifier. Its scripts, sample files and 16 tests are preserved:
-
-```sh
-python -m unittest test_extract -v
-python extract_features.py --input data/sample.pcap --output /tmp/legacy-features.csv
-
-docker run --rm --platform linux/arm64 --network none \
-  edge-sec-guardian:cli python extract_features.py \
-  --input data/sample.pcap --output /tmp/legacy-features.csv
-```
-
-The supplied sample has six packets in three flows. There is no live capture,
-web server, database or hardware deployment in this application.
-
-## Verification
-
-Final integration review on 14 November 2026 used the existing
-`edge-sec-guardian:baseline` image (Python 3.13.18, `aarch64`). Its Python source
-hashes matched the checkout. The `:cli` tag in the build commands above is a local
-name for an image built from the same Dockerfile.
-
-- All 58 tests passed with networking disabled and the checkout mounted read-only:
-  11 CLI, 11 model, 6 explanation, 16 legacy extractor, and 14 preprocessing tests.
-- `pip check` passed. Both dataset files matched their recorded hashes and counts.
-- Re-evaluating the saved model on every held-out row reproduced all saved metrics.
-- The real CLI returned `attack`, `0.7849` for row 0 and generated an explanation
-  through native Ollama at `host.docker.internal:11434` with read-only data/model
-  mounts. This check used local HTTP; it was not a network-disabled container run.
-
-Unit tests use small synthetic fixtures and mocked HTTP where appropriate; the
-separate real-data and local-model checks establish end-to-end operation. The
-review reused the existing image and model; it did not rebuild or retrain them.
+Run the repository tests on Windows with `.\.venv\Scripts\python.exe -m unittest -v` or on Linux with `.venv/bin/python -m unittest -v`. Tests use offline packet fixtures and mocked explanation backends.

@@ -134,7 +134,7 @@ async function refresh() {
     byId('mode').textContent = s.status + ' · ' + s.scoring;
     const metrics = [['CPU',d.cpu_percent,'%'],['RAM',d.ram_mb,' MB'],['RAM used',d.ram_percent,'%'],
       ['CPU temperature',d.temperature_c,' °C'],['Packets / sec',c.packets_per_sec],['Open flows',c.open_flows],
-      ['Skipped',c.packets_skipped],['Dropped',c.packets_dropped]];
+      ['Packets skipped',c.packets_skipped],['Packets dropped',c.packets_dropped],['Flows dropped',c.flows_dropped]];
     byId('metrics').replaceChildren(...metrics.map(([label,value,unit]) => {
       const wrap = node('div'); wrap.append(node('dt',label),node('dd',value == null ? 'N/A' : value + (unit || ''))); return wrap;
     }));

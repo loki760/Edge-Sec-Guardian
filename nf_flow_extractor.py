@@ -27,7 +27,8 @@ FEATURE_COLUMNS = MODEL_FEATURE_COLUMNS
 PROTOCOL_NAMES = {1: "ICMP", 6: "TCP", 17: "UDP"}
 FLAG_BITS = (2, 16, 1, 4, 8, 32)
 META_COLUMNS = ["src_ip", "dst_ip", "src_port", "dst_port", "protocol",
-                "flow_start_ts", "flow_end_ts", "emit_reason", "emit_delay_ms"]
+                "flow_start_ts", "flow_end_ts", "emit_reason", "emit_delay_ms", "tcp_initial_flags"]
+RECEIVE_BUFFER_BYTES = 16 * 1024 * 1024
 
 
 class Moments:
@@ -81,16 +82,20 @@ class FlowEngine:
         self.started = time.monotonic()
         self.finished = None
         self.dropped = None
+        self.flows_dropped = 0
+        self.receive_buffer_bytes = None
+        self.capture_backend = None
 
     def counters(self):
         elapsed = (self.finished or time.monotonic()) - self.started
         return dict(packets_seen=self.seen, packets_skipped=self.skipped,
-                    packets_dropped=self.dropped, flows_emitted=self.emitted,
+                    packets_dropped=self.dropped, flows_emitted=self.emitted, flows_dropped=self.flows_dropped,
+                    receive_buffer_bytes=self.receive_buffer_bytes, capture_backend=self.capture_backend,
                     open_flows=len(self.flows), packets_per_sec=round(self.seen / max(elapsed, 1e-6), 2),
                     avg_emit_delay_ms=round(self.total_delay / max(1, self.emitted), 3))
 
     def emit(self, key, reason):
-        first, start, directions, lengths, totals = self.flows.pop(key)
+        first, start, directions, lengths, totals, initial_flags = self.flows.pop(key)
         end = self.activity.pop(key)
         forward, reverse = directions
         delay = round((self.clock - end) * 1000, 3)
@@ -105,7 +110,7 @@ class FlowEngine:
                   forward.packets / (reverse.packets + 1), forward.size / (reverse.size + 1),
                   *lengths.summary(), *(total / count for total in totals),
                   *forward.gaps.summary(), *reverse.gaps.summary()]
-        meta = [*first, start, end, reason, delay]
+        meta = [*first, start, end, reason, delay, initial_flags]
         return {"metadata": dict(zip(META_COLUMNS, meta)),
                 "features": dict(zip(MODEL_FEATURE_COLUMNS, values))}
 
@@ -147,8 +152,9 @@ class FlowEngine:
         if key not in self.flows:
             if len(self.flows) == self.cap:
                 yield self.emit(next(iter(self.flows)), "capacity")
-            self.flows[key] = (endpoints, self.clock, (Direction(), Direction()), Moments(), [0] * 7)
-        first, _, directions, lengths, totals = self.flows[key]
+            self.flows[key] = (endpoints, self.clock, (Direction(), Direction()), Moments(), [0] * 7,
+                               flags if number == 6 else None)
+        first, _, directions, lengths, totals, _ = self.flows[key]
         directions[int(first != endpoints)].add(self.clock, size)
         lengths.add(size)
         totals[0] += ttl
@@ -247,6 +253,45 @@ def iter_pcap_flows(path, engine=None, stop=None, max_packets=None, max_flows=No
                      flows_over_cap=engine.emitted - written)
 
 
+def configure_receive_buffer(raw):
+    try:
+        raw.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RECEIVE_BUFFER_BYTES)
+    except OSError:
+        pass
+    try:
+        # Linux reports the effective buffer, including its bookkeeping allowance.
+        return raw.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+    except OSError:
+        return None
+
+
+def sample_packet_drops(raw, engine):
+    try:
+        stats = raw.getsockopt(263, 6, 8)  # SOL_PACKET, PACKET_STATISTICS; resets on read.
+    except OSError:
+        return
+    engine.dropped = (engine.dropped or 0) + struct.unpack("=II", stats)[1]
+
+
+def receive_ethernet(sock, raw, engine, deliver, stop):
+    raw.settimeout(0.5)
+    next_stats = time.monotonic() + 0.5
+    while stop is None or not stop.is_set():
+        try:
+            _, data, timestamp = sock.recv_raw()
+        except TimeoutError:
+            # Advance wall time only when the receive buffer is empty.
+            deliver(engine.expire(time.time()))
+        else:
+            if data:
+                deliver(engine.feed_fields(float(timestamp) if timestamp is not None else time.time(),
+                                           ethernet_fields(data)))
+        now = time.monotonic()
+        if now >= next_stats:
+            sample_packet_drops(raw, engine)
+            next_stats = now + 0.5
+
+
 def stream_live_flows(interface, on_flow, engine=None, stop=None, measure=None):
     engine = engine or FlowEngine()
 
@@ -255,25 +300,29 @@ def stream_live_flows(interface, on_flow, engine=None, stop=None, measure=None):
             on_flow(row)
 
     sock = conf.L2listen(iface=interface)
+    raw = getattr(sock, "ins", None)
+    af_packet = sys.platform.startswith("linux") and getattr(raw, "family", None) == socket.AF_PACKET
     try:
+        if af_packet:
+            engine.receive_buffer_bytes = configure_receive_buffer(raw)
+            if getattr(sock, "LL", None) is Ether:
+                engine.capture_backend = "af_packet_ethernet"
+                receive_ethernet(sock, raw, engine, deliver, stop)
+                return
+        engine.capture_backend = "scapy"
         while stop is None or not stop.is_set():
             sniff(opened_socket=sock, store=False, timeout=0.5, chainCC=True,
                   prn=lambda packet: deliver(engine.feed(packet)))
             if sock.closed:
                 raise OSError("Capture socket closed during sniffing")
-            # Linux AF_PACKET returns (received, dropped) since the last read.
-            raw = getattr(sock, "ins", None)
-            if sys.platform.startswith("linux") and getattr(raw, "family", None) == socket.AF_PACKET:
-                try:
-                    stats = raw.getsockopt(263, 6, 8)  # SOL_PACKET, PACKET_STATISTICS
-                except OSError:
-                    engine.dropped = None
-                else:
-                    engine.dropped = (engine.dropped or 0) + struct.unpack("=II", stats)[1]
+            if af_packet:
+                sample_packet_drops(raw, engine)
             deliver(engine.expire(time.time()))
     except KeyboardInterrupt:
         pass
     finally:
+        if af_packet:
+            sample_packet_drops(raw, engine)
         sock.close()
         deliver(engine.flush("interrupt"))
 

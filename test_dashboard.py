@@ -11,7 +11,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from dashboard import Dashboard, capture, demo_score, make_server
+from dashboard import Dashboard, capture, capture_live, demo_score, make_server
 from nf_flow_extractor import FEATURE_COLUMNS, iter_pcap_flows
 from risk_fusion import RiskFusionScorer
 
@@ -163,7 +163,7 @@ class DashboardTests(unittest.TestCase):
                     scorer = RiskFusionScorer()
                     features = dict(row["features"], PROTOCOL_NUM=number, IN_PKTS=100,
                                     OUT_PKTS=10, FLOW_DURATION_MILLISECONDS=duration)
-                    metadata = dict(row["metadata"], protocol=protocol)
+                    metadata = dict(row["metadata"], protocol=protocol, src_port=52000, dst_port=9000)
                     score = scorer(features, metadata)
                     self.assertEqual(score["verdict"], "Flagged")
                     self.assertEqual(score["signals"], [f"Rule: {protocol} flood pattern"])
@@ -184,6 +184,128 @@ class DashboardTests(unittest.TestCase):
                     score = RiskFusionScorer()(features, dict(row["metadata"], protocol=protocol))
                     self.assertEqual(score["verdict"], "Clear")
                     self.assertEqual(score["signals"], [])
+
+    def test_local_management_and_discovery_do_not_reach_scorer(self):
+        row = self.rows[0]
+        scorer = RiskFusionScorer(management_ips=["10.42.0.1"], dashboard_port=8080)
+        peer, pi = "10.42.0.2", "10.42.0.1"
+        for source, dest, sport, dport, protocol, expected in (
+            (peer, pi, 52000, 8080, "TCP", "local_management"),
+            (pi, peer, 22, 52000, "TCP", "local_management"),
+            (peer, "224.0.0.251", 5353, 5353, "UDP", "multicast_or_broadcast"),
+            (peer, "255.255.255.255", 68, 67, "UDP", "multicast_or_broadcast"),
+        ):
+            with self.subTest(destination=dest, port=dport):
+                metadata = dict(row["metadata"], src_ip=source, dst_ip=dest,
+                                src_port=sport, dst_port=dport, protocol=protocol)
+                score = scorer({}, metadata)  # Excluded flows do not need model or rule features.
+                self.assertEqual(score["verdict"], "Unscored")
+                self.assertEqual(score["scope_exclusion"], expected)
+                self.assertIsNone(score["ml_probability"])
+        self.assertFalse(scorer.sources)
+        metadata = dict(row["metadata"], src_ip=peer, dst_ip="198.51.100.80",
+                        src_port=52000, dst_port=8080)
+        self.assertNotIn("scope_exclusion", scorer(row["features"], metadata))
+
+    def test_bidirectional_quic_is_exempt_from_udp_flood_rule(self):
+        row = self.rows[0]
+        for ports in ((52000, 443), (443, 52000)):
+            metadata = dict(row["metadata"], protocol="UDP", src_port=ports[0], dst_port=ports[1])
+            features = dict(row["features"], PROTOCOL_NUM=17, IN_PKTS=1000, OUT_PKTS=1,
+                            FLOW_DURATION_MILLISECONDS=200, PKTS_PER_SEC=5005)
+            self.assertEqual(RiskFusionScorer()(features, metadata)["signals"], [])
+            features["OUT_PKTS"] = 0
+            self.assertIn("Rule: UDP flood pattern", RiskFusionScorer()(features, metadata)["signals"])
+
+    def test_port_scan_still_triggers_with_management_exclusion(self):
+        row = self.rows[0]
+        scorer = RiskFusionScorer(management_ips=["10.42.0.1"])
+        scored = []
+        for port in range(1, 81):
+            metadata = dict(row["metadata"], protocol="TCP", src_ip="10.42.0.2",
+                            dst_ip="10.42.0.1", dst_port=port, flow_end_ts=port / 10)
+            scored.append(scorer(row["features"], metadata))
+        self.assertTrue(any(score["risk_level"] == "High" and
+                            "Rule: distinct destination port burst" in score["signals"] for score in scored))
+
+    def test_dns_replies_and_separate_opening_flows_do_not_share_scan_state(self):
+        row = self.rows[0]
+        scorer = RiskFusionScorer()
+        reply = dict(row["metadata"], src_ip="10.42.0.1", dst_ip="10.42.0.2", src_port=53)
+        features = dict(row["features"], IN_PKTS=1, OUT_PKTS=0, SYN_RATIO=0, ACK_RATIO=1, PKTS_PER_SEC=0)
+        for flags in (0x10, 0x12):
+            for port in range(52000, 52012):
+                score = scorer(features, dict(reply, dst_port=port, tcp_initial_flags=flags))
+                self.assertNotIn("Rule: distinct destination port burst", score["signals"])
+        self.assertFalse(scorer.sources)
+        for number in (6, 17):
+            for index in range(2, 4):
+                for port in range(1, 5):
+                    metadata = dict(row["metadata"], dst_ip=f"198.51.100.{index}", dst_port=port,
+                                    protocol="TCP" if number == 6 else "UDP")
+                    score = scorer(dict(features, PROTOCOL_NUM=number), metadata)
+                    self.assertNotIn("Rule: distinct destination port burst", score["signals"])
+        self.assertEqual(len(scorer.sources), 4)
+
+    def test_bidirectional_https_bursts_need_corroboration(self):
+        row = self.rows[0]
+        for forward, reverse, flags, syn in [(316, 940, 2, .0016), (8, 7, 16, 0), (100, 4, 2, .01)]:
+            features = dict(row["features"], IN_PKTS=forward, OUT_PKTS=reverse, PKTS_PER_SEC=1400,
+                            ACK_RATIO=.99, SYN_RATIO=syn)
+            score = RiskFusionScorer()(features, dict(row["metadata"], tcp_initial_flags=flags))
+            self.assertEqual(score["verdict"], "Clear")
+        features.update(IN_PKTS=100, OUT_PKTS=0, ACK_RATIO=0, SYN_RATIO=1)
+        score = RiskFusionScorer()(features, dict(row["metadata"], tcp_initial_flags=2))
+        self.assertIn("Rule: extreme packet rate", score["signals"])
+        self.assertEqual(score["risk_level"], "High")
+
+    def test_single_midstream_web_reply_cannot_become_ml_alert(self):
+        import pandas as pd
+        import sklearn
+        from sklearn.tree import DecisionTreeClassifier
+
+        model = DecisionTreeClassifier(random_state=42).fit(pd.DataFrame({"IN_PKTS": [1, 10]}), [1, 0])
+        scorer = RiskFusionScorer(dict(schema_version=1, model=model, algorithm="DecisionTreeClassifier",
+                                       feature_columns=["IN_PKTS"], sklearn_version=sklearn.__version__,
+                                       med_threshold=.3, high_threshold=.7, med_threshold_method="heuristic",
+                                       attack_families=["test"]))
+        row = self.rows[0]
+        metadata = dict(row["metadata"], src_port=443, dst_port=53894)
+        for flag, bits in (("ACK_RATIO", 16), ("FIN_RATIO", 1), ("RST_RATIO", 4), ("ACK_RATIO", 18)):
+            with self.subTest(flags=bits):
+                features = dict(row["features"], IN_PKTS=1, OUT_PKTS=0, PKTS_PER_SEC=0,
+                                SYN_RATIO=int(bool(bits & 2)), ACK_RATIO=0, FIN_RATIO=0, RST_RATIO=0)
+                features[flag] = 1
+                score = scorer(features, dict(metadata, tcp_initial_flags=bits))
+                self.assertEqual(score["scope_exclusion"], "isolated_tcp_reply")
+                self.assertIsNone(score["ml_probability"])
+                self.assertEqual(score["signals"], [])
+        features.update(SYN_RATIO=1, ACK_RATIO=0)
+        self.assertEqual(scorer(features, dict(metadata, tcp_initial_flags=2))["risk_level"], "High")
+
+    def test_live_capture_can_continue_when_scoring_queue_is_full(self):
+        entered, release = threading.Event(), threading.Event()
+        accepted = []
+
+        def accept(row):
+            accepted.append(row)
+            entered.set()
+            release.wait(5)
+
+        def stream(_interface, submit, _engine, _stop):
+            try:
+                submit(1)
+                self.assertTrue(entered.wait(5))
+                submit(2)
+                submit(3)
+            finally:
+                release.set()
+
+        with patch("dashboard.stream_live_flows", side_effect=stream), \
+             patch("dashboard.LIVE_FLOW_QUEUE_CAPACITY", 1), patch.object(self.state, "accept", side_effect=accept):
+            capture_live("fixture", self.state, threading.Event())
+        self.assertEqual(accepted, [1, 2])
+        self.assertEqual(self.state.engine.counters()["flows_dropped"], 1)
 
 
 class MockExplainer:

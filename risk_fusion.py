@@ -1,5 +1,6 @@
 """Score completed CIC flows using a trusted fitted model and optional traffic rules."""
 from collections import OrderedDict
+from ipaddress import IPv4Address
 import math
 from numbers import Real
 import pickle
@@ -11,20 +12,41 @@ import sklearn
 from nf_flow_extractor import MODEL_FEATURE_COLUMNS
 
 
-def flood_signal(features):
+def scope_exclusion(metadata, management_ips, management_ports):
+    endpoints = ((metadata["src_ip"], metadata["src_port"]),
+                 (metadata["dst_ip"], metadata["dst_port"]))
+    for address, port in endpoints:
+        if IPv4Address(address).is_multicast or address == "255.255.255.255":
+            return "multicast_or_broadcast"
+        if metadata["protocol"] == "TCP" and address in management_ips and port in management_ports:
+            return "local_management"
+    return None
+
+
+def flood_signal(features, metadata):
     """Use completed-flow volume, direction and forward rate for UDP and ICMP."""
     protocol = features["PROTOCOL_NUM"]
     if protocol not in (1, 17):
         return None
     forward = features["IN_PKTS"]
+    reverse = features["OUT_PKTS"]
     duration_ms = features["FLOW_DURATION_MILLISECONDS"]
-    if forward < 100 or duration_ms <= 0 or features["OUT_PKTS"] > 0.1 * forward:
+    if protocol == 17 and reverse > 0 and 443 in (metadata["src_port"], metadata["dst_port"]):
+        return None
+    if forward < 100 or duration_ms <= 0 or reverse > 0.1 * forward:
         return None
     rate = 1000 * forward / duration_ms
     if rate >= 1000 or (duration_ms >= 1000 and rate >= 100):
         name = "UDP" if protocol == 17 else "ICMP"
         return f"Rule: {name} flood pattern"
     return None
+
+
+def tcp_started_with_syn(features, metadata):
+    flags = metadata.get("tcp_initial_flags")
+    if flags is not None:
+        return (flags & 0x12) == 0x02
+    return features.get("SYN_RATIO", 0) > 0 and features.get("ACK_RATIO", 0) == 0
 
 
 def validate_bundle(bundle):
@@ -65,24 +87,28 @@ def load_ciciot_bundle(path):
 
 
 class RiskFusionScorer:
-    def __init__(self, bundle=None, enable_rules=True):
+    def __init__(self, bundle=None, enable_rules=True, *, management_ips=(), dashboard_port=8080):
         self.bundle = validate_bundle(bundle) if bundle is not None else None
         self.enable_rules = enable_rules
+        self.management_ips = frozenset(str(IPv4Address(address)) for address in management_ips)
+        self.management_ports = {22, dashboard_port}
         self.reset()
 
     def reset(self):
         self.sources = OrderedDict()
         self.latest_end = float("-inf")
 
-    def scan_burst(self, metadata):
-        if metadata["protocol"] not in ("TCP", "UDP"):
+    def scan_burst(self, features, metadata):
+        protocol = metadata["protocol"]
+        if protocol not in ("TCP", "UDP") or (protocol == "TCP" and not tcp_started_with_syn(features, metadata)):
             return False
         end = float(metadata["flow_end_ts"])
         self.latest_end = max(self.latest_end, end)
         cutoff = self.latest_end - 10
         if end < cutoff:
             return False
-        source, port = metadata["src_ip"], metadata["dst_port"]
+        source = (metadata["src_ip"], metadata["dst_ip"], protocol)
+        port = metadata["dst_port"]
         if source not in self.sources and len(self.sources) >= 2000:
             self.sources.popitem(last=False)
         ports = self.sources.setdefault(source, {})
@@ -96,6 +122,16 @@ class RiskFusionScorer:
 
     def __call__(self, features, metadata):
         start = perf_counter()
+        excluded = scope_exclusion(metadata, self.management_ips, self.management_ports)
+        if (not excluded and metadata["protocol"] == "TCP" and metadata["src_port"] in (80, 443)
+                and features["IN_PKTS"] == 1 and features["OUT_PKTS"] == 0
+                and not tcp_started_with_syn(features, metadata)
+                and any(features[flag] > 0 for flag in ("ACK_RATIO", "FIN_RATIO", "RST_RATIO"))):
+            excluded = "isolated_tcp_reply"
+        if excluded:
+            return dict(verdict="Unscored", prediction=None, risk_score=None, risk_level=None,
+                        ml_probability=None, signals=[], explanation="", scope_exclusion=excluded,
+                        detector_ms=(perf_counter() - start) * 1000)
         signals = []
         probability = None
         ml_alert = False
@@ -113,16 +149,20 @@ class RiskFusionScorer:
                 signals.append("ML: attack probability reached the validation threshold")
         rules = []
         if self.enable_rules:
-            if self.scan_burst(metadata):
+            if self.scan_burst(features, metadata):
                 rules.append("Rule: distinct destination port burst")
-            if (features["PROTOCOL_NUM"] == 6 and features["IN_PKTS"] >= 10
-                    and features["SYN_RATIO"] >= 0.8 and features["ACK_RATIO"] <= 0.1):
+            syn_heavy = (features["PROTOCOL_NUM"] == 6 and features["IN_PKTS"] >= 10
+                         and features["SYN_RATIO"] >= 0.8 and features["ACK_RATIO"] <= 0.1)
+            if syn_heavy:
                 rules.append("Rule: SYN-heavy TCP flow")
-            flood = flood_signal(features)
+            flood = flood_signal(features, metadata)
             if flood:
                 rules.append(flood)
-            if (features["PROTOCOL_NUM"] not in (1, 17) and features["PKTS_PER_SEC"] >= 1000
-                    and features["IN_PKTS"] + features["OUT_PKTS"] >= 10):
+            if (features["PROTOCOL_NUM"] == 6 and features["PKTS_PER_SEC"] >= 1000
+                    and features["IN_PKTS"] >= 10
+                    and (syn_heavy or (tcp_started_with_syn(features, metadata)
+                                       and features["OUT_PKTS"] <= 0.1 * features["IN_PKTS"]
+                                       and features["ACK_RATIO"] <= 0.1))):
                 rules.append("Rule: extreme packet rate")
         signals.extend(rules)
         flagged = bool(signals)

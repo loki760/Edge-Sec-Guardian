@@ -1,11 +1,13 @@
 import copy
+import struct
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from scapy.all import IP, Raw, TCP, wrpcap
+from scapy.all import Ether, IP, Raw, TCP, wrpcap
 from scapy.utils import PcapNgWriter
 
 from build_ciciot_dataset import capture_label
@@ -29,6 +31,7 @@ class FlowTests(unittest.TestCase):
         self.assertEqual([row["features"] for row in rows],
                          [dict(zip(FEATURE_COLUMNS, values)) for values in expected])
         self.assertEqual([r["metadata"]["emit_reason"] for r in rows], ["fin", "idle_timeout", "eof", "eof"])
+        self.assertEqual([r["metadata"]["tcp_initial_flags"] for r in rows], [2, None, None, None])
         self.assertEqual(rows[1]["metadata"]["emit_delay_ms"], 15750)
         self.assertEqual(engine.counters()["packets_seen"], 10)
         self.assertEqual(engine.counters()["open_flows"], 0)
@@ -134,6 +137,31 @@ class FlowTests(unittest.TestCase):
                 self.assertEqual(rows[0]["metadata"]["emit_reason"], reason)
                 self.assertEqual(rows[0]["features"]["IN_BYTES"], 40)
                 sock.close.assert_called_once()
+
+    def test_linux_capture_uses_raw_frame_path_and_reports_capped_buffer(self):
+        packet = sample_packets()[0]
+        stop = threading.Event()
+        raw = Mock(family=17)
+        raw.setsockopt.side_effect = OSError("buffer capped")
+        raw.getsockopt.side_effect = (8 * 1024 * 1024, struct.pack("=II", 8, 3))
+        sock = Mock(ins=raw, LL=Ether)
+
+        def receive():
+            stop.set()
+            return Ether, bytes(packet), float(packet.time)
+
+        sock.recv_raw.side_effect = receive
+        engine, rows = FlowEngine(), []
+        with patch("nf_flow_extractor.sys", SimpleNamespace(platform="linux")), \
+             patch("nf_flow_extractor.socket.AF_PACKET", 17, create=True), \
+             patch("nf_flow_extractor.conf.L2listen", return_value=sock), patch("nf_flow_extractor.sniff") as sniff:
+            stream_live_flows("fixture", rows.append, engine, stop)
+        sniff.assert_not_called()
+        sock.close.assert_called_once()
+        self.assertEqual(rows[0]["metadata"]["tcp_initial_flags"], 2)
+        self.assertEqual(engine.counters()["receive_buffer_bytes"], 8 * 1024 * 1024)
+        self.assertEqual(engine.counters()["packets_dropped"], 3)
+        self.assertEqual(engine.counters()["capture_backend"], "af_packet_ethernet")
 
 
 if __name__ == "__main__":
