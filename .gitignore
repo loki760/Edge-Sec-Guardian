@@ -8,7 +8,10 @@ __pycache__/
 .ruff_cache/
 .cache/
 data/raw/
-artifacts/
+data/processed/
+*.pcap
+*.pcapng
+!data/nf_test_sample.pcap
 *.csv
 !data/features.csv
 *.tsv
@@ -29,3 +32,15 @@ secrets/
 *.key
 id_rsa*
 id_ed25519*
+*.db
+*.db-shm
+*.db-wal
+*.pte
+tokenizer.model
+artifacts/benchmark*.json
+artifacts/benchmark*.md
+artifacts/benchmark*.log
+artifacts/wheels/
+artifacts/wheel-smoke/
+build/
+*.egg-info/

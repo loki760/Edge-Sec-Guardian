@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "edge-sec-guardian"
+version = "0.1.0"
+description = "Local network flow detection and benchmarking for Edge-Sec Guardian"
+requires-python = ">=3.10"
+dependencies = [
+    "scikit-learn>=1.2",
+    "pandas>=1.5",
+    "numpy>=1.23",
+    "scapy>=2.6.1",
+    "psutil>=5.9",
+    "threadpoolctl>=3",
+]
+
+[project.scripts]
+edge-sec-dashboard = "dashboard:main"
+edge-sec-benchmark = "benchmark:main"
+
+[tool.setuptools]
+packages = ["static"]
+py-modules = [
+    "benchmark", "dashboard", "explain", "nf_flow_extractor", "risk_fusion",
+    "build_ciciot_dataset", "eda_ciciot", "select_ciciot_features", "train_ciciot_model",
+]
+
+[tool.setuptools.package-data]
+static = ["index.html"]

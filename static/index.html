@@ -11,6 +11,14 @@ section{border:1px solid #344743;background:#182322;border-radius:12px;margin-bo
 #metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:16px;margin:18px 0 0}
 dt,th,.sub,small{font-size:13px;color:#adc1b8}dd{margin:2px 0 0;font-size:21px;font-variant-numeric:tabular-nums}
 #banner,.alert{padding:12px 16px;background:#282b22;border-left:3px solid #eabc70;margin-top:14px}
+#alerts{max-height:420px;overflow-y:auto;padding-right:8px}
+#alerts:focus-visible{outline:2px solid #b6f5cd;outline-offset:3px}
+.alert-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px 16px;margin:12px 0}
+.alert-metrics dd{font-size:17px}
+.alert-explanation{border-top:1px solid #4f5445;margin-top:12px;padding-top:10px;overflow-wrap:anywhere}
+.alert-explanation h3{font-size:14px;margin:0 0 4px}
+.alert-explanation p{white-space:pre-wrap}
+.alert-explanation p + p{margin-top:6px}
 .badge{border-radius:4px;background:#544027;color:#ffdf9e;padding:2px 8px;font-size:13px}
 button{background:#30443e;color:#eaf6ef;border:1px solid #60786b;border-radius:5px;padding:6px 11px;cursor:pointer;margin:8px 8px 0 0}
 button:focus-visible{outline:2px solid #b6f5cd}button:disabled{opacity:.65}ul{margin:8px 0;padding-left:20px}.scroll{overflow:auto}
@@ -20,8 +28,8 @@ td.flag{color:#f5ce87}.empty{padding:14px 0;color:#adc1b8}#banner[hidden]{displa
 <header><div><strong class="brand">Edge-Sec Guardian</strong><span id="connection" role="status">Connecting…</span></div></header>
 <main><div class="heading"><h1>Traffic monitor</h1><span class="sub" id="mode"></span></div>
 <section><h2>Real-time device benchmarks</h2><dl id="metrics"></dl></section>
-<section><h2>Live alerts</h2><p id="banner" role="status" hidden></p><div id="alerts"></div></section>
-<section><h2>Live traffic</h2><div class="scroll"><table><thead><tr><th>Flow start</th><th>Source → destination</th><th>Protocol</th><th>Packets in / out</th><th>Bytes in / out</th><th>Duration (ms)</th><th>Verdict</th></tr></thead><tbody id="traffic"></tbody></table></div><p id="empty" class="empty">Waiting for completed flows.</p></section>
+<section><h2 id="alerts-title">Live alerts</h2><p id="banner" role="status" hidden></p><div id="alerts" role="region" aria-labelledby="alerts-title" tabindex="0"></div></section>
+<section><h2>Live traffic</h2><div class="scroll"><table><thead><tr><th>Flow start</th><th>Source → destination</th><th>Protocol</th><th>Packets in / out</th><th>Bytes in / out</th><th>Duration (ms)</th><th>Verdict</th><th>Attack probability</th><th>Risk score</th><th>Risk level</th><th>Signals</th><th>Detector (ms)</th></tr></thead><tbody id="traffic"></tbody></table></div><p id="empty" class="empty">Waiting for completed flows.</p></section>
 </main><script>
 const byId = id => document.getElementById(id);
 function node(tag, value, cls) {
@@ -31,6 +39,8 @@ function node(tag, value, cls) {
   return el;
 }
 const endpoint = m => m.src_ip + ':' + m.src_port + ' → ' + m.dst_ip + ':' + m.dst_port;
+const decimal = (value, places, unit = '') => Number.isFinite(value) ? value.toFixed(places) + unit : '—';
+const probability = value => Number.isFinite(value) ? decimal(100 * value, 1, '%') : '—';
 let highest = 0, alertVersion = '';
 async function feedback(id, value, button) {
   button.disabled = true;
@@ -45,17 +55,57 @@ async function feedback(id, value, button) {
     byId('banner').textContent = 'Feedback could not be saved. Try again.';
   } finally { button.disabled = false; }
 }
+function renderExplanation(alert) {
+  const block = node('div', null, 'alert-explanation');
+  block.append(node('h3', 'Explanation'));
+  if (alert.ai_explanation) block.append(node('p', alert.ai_explanation));
+  if (alert.recommended_action) {
+    const action = node('p');
+    action.append(node('strong', 'Recommended action '), alert.recommended_action);
+    block.append(action);
+  }
+  if (!alert.ai_explanation && !alert.recommended_action) {
+    const mlOnly = Number.isFinite(alert.ml_probability) && !(alert.signals || []).some(s => s.startsWith('Rule:'));
+    const skipped = {
+      queue_full: 'Explanation skipped · Queue full',
+      below_threshold: 'Explanation skipped · Below configured risk level',
+      shutdown: 'Explanation skipped · Dashboard stopped',
+      interrupted: 'Explanation skipped · Previous session ended'
+    };
+    const labels = {
+      pending: 'Pending explanation...',
+      skipped: skipped[alert.explanation_reason] || 'Explanation skipped',
+      error: 'Explanation unavailable'
+    };
+    const status = labels[alert.explanation_status] ||
+      (mlOnly ? 'ML-only (Llama not invoked)' : 'Llama not invoked');
+    block.append(node('p', status, 'sub'));
+  }
+  return block;
+}
 function renderAlerts(alerts) {
-  const version = JSON.stringify(alerts.map(a => [a.id,a.feedback]));
+  const version = JSON.stringify(alerts.map(a =>
+    [a.id, a.feedback, a.explanation_status, a.explanation_reason, a.ai_explanation, a.recommended_action]));
   if (version === alertVersion) return;
   alertVersion = version;
   const cards = alerts.map(a => {
     const card = node('article', null, 'alert'), head = node('div', null, 'alert-head');
-    head.append(node('strong', endpoint(a.metadata)), node('span', a.severity, 'badge'));
+    head.append(node('strong', endpoint(a.metadata)), node('span', a.risk_level || a.severity, 'badge'));
     card.append(head, node('small', a.scoring + ' · ' + new Date(a.metadata.flow_start_ts*1000).toLocaleString()));
-    const signals = node('ul');
-    a.signals.forEach(s => signals.append(node('li', s)));
-    card.append(signals, node('p', a.explanation));
+    const metrics = node('dl', null, 'alert-metrics');
+    for (const [label, value] of [['Attack probability', probability(a.ml_probability)],
+      ['Risk score', decimal(a.risk_score, 3)], ['Detector latency', decimal(a.detector_ms, 1, ' ms')]]) {
+      const metric = node('div');
+      metric.append(node('dt', label), node('dd', value));
+      metrics.append(metric);
+    }
+    card.append(metrics);
+    if (a.signals?.length) {
+      const signals = node('ul');
+      a.signals.forEach(s => signals.append(node('li', s)));
+      card.append(signals);
+    }
+    card.append(renderExplanation(a));
     if (a.feedback) card.append(node('strong', a.feedback === 'confirmed' ? 'Confirmed threat' : 'Dismissed'));
     else for (const [label,value] of [['Confirm Threat','confirmed'],['Dismiss','dismissed']]) {
       const b = node('button',label);
@@ -64,7 +114,9 @@ function renderAlerts(alerts) {
     }
     return card;
   });
-  byId('alerts').replaceChildren(...(cards.length ? cards : [node('p','No flagged flows.','empty')]));
+  const container = byId('alerts'), scrollTop = container.scrollTop;
+  container.replaceChildren(...(cards.length ? cards : [node('p','No flagged flows.','empty')]));
+  container.scrollTop = scrollTop;
   if (alerts.length && alerts[0].id > highest) {
     const banner = byId('banner');
     banner.hidden = false;
@@ -82,7 +134,7 @@ async function refresh() {
     byId('mode').textContent = s.status + ' · ' + s.scoring;
     const metrics = [['CPU',d.cpu_percent,'%'],['RAM',d.ram_mb,' MB'],['RAM used',d.ram_percent,'%'],
       ['CPU temperature',d.temperature_c,' °C'],['Packets / sec',c.packets_per_sec],['Open flows',c.open_flows],
-      ['Skipped',c.packets_skipped],['Dropped',c.packets_dropped]];
+      ['Packets skipped',c.packets_skipped],['Packets dropped',c.packets_dropped],['Flows dropped',c.flows_dropped]];
     byId('metrics').replaceChildren(...metrics.map(([label,value,unit]) => {
       const wrap = node('div'); wrap.append(node('dt',label),node('dd',value == null ? 'N/A' : value + (unit || ''))); return wrap;
     }));
@@ -91,7 +143,9 @@ async function refresh() {
     byId('traffic').replaceChildren(...s.traffic.map(r => {
       const tr = node('tr'), m = r.metadata, f = r.features;
       for (const value of [new Date(m.flow_start_ts*1000).toLocaleString(),endpoint(m),m.protocol,
-        f.IN_PKTS+' / '+f.OUT_PKTS,f.IN_BYTES+' / '+f.OUT_BYTES,f.FLOW_DURATION_MILLISECONDS,r.verdict])
+        f.IN_PKTS+' / '+f.OUT_PKTS,f.IN_BYTES+' / '+f.OUT_BYTES,decimal(f.FLOW_DURATION_MILLISECONDS, 2),r.verdict,
+        probability(r.ml_probability),decimal(r.risk_score, 3),r.risk_level || '—',
+        (r.signals || []).join(' · ') || '—',decimal(r.detector_ms, 2)])
         tr.append(node('td',value,value === 'Flagged' ? 'flag' : ''));
       return tr;
     }));

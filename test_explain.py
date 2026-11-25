@@ -2,13 +2,19 @@
 
 import copy
 import json
+from pathlib import Path
+import tempfile
+from types import SimpleNamespace
 import unittest
 from io import BytesIO
 from http.client import IncompleteRead
 from urllib.error import HTTPError, URLError
 from unittest.mock import MagicMock, patch
 
-from explain import explain_prediction, LocalOnlyRedirectHandler
+from explain import (
+    build_alert_prompt, create_explainer, explain_prediction, LocalOnlyRedirectHandler,
+    parse_alert_response,
+)
 
 
 class ExplainTests(unittest.TestCase):
@@ -90,6 +96,150 @@ class ExplainTests(unittest.TestCase):
         handler = LocalOnlyRedirectHandler()
         self.assertIsNone(handler.redirect_request(None, None, 302, "", {},
                                                   "https://example.com"))
+
+    def test_alert_evidence_is_allowlisted_and_output_has_exact_fields(self):
+        flow = dict(verdict="Flagged", risk_score=0.987654, risk_level="High",
+                    signals=["Rule: SYN-heavy TCP flow", "UNTRUSTED_SIGNAL"],
+                    metadata={"src_ip": "203.0.113.77", "payload": "PACKET_CONTENT"},
+                    label="GROUND_TRUTH", attack_family="DATASET_LABEL",
+                    features={"PROTOCOL_NUM": 6, "IN_PKTS": 100, "OUT_PKTS": 0,
+                              "IN_BYTES": 4000, "OUT_BYTES": 0, "PKTS_PER_SEC": float("nan"),
+                              "SYN_RATIO": 0.987654, "payload": "PACKET_CONTENT"})
+        prompt, schema = build_alert_prompt(flow)
+        for secret in ("UNTRUSTED_SIGNAL", "203.0.113.77", "PACKET_CONTENT", "GROUND_TRUTH", "DATASET_LABEL"):
+            self.assertNotIn(secret, prompt)
+        self.assertEqual(prompt.splitlines()[-3:], [
+            "Verdict: Flagged (High, score 0.988)",
+            "Signals: Rule: SYN-heavy TCP flow",
+            "Traffic: TCP, 100 in / 0 out packets, 4000 in / 0 out bytes, unknown pkts/s, SYN ratio 0.988",
+        ])
+        good = dict(explanation="The device made many connection attempts in a short time.",
+                    recommended_action="Check whether someone was running an expected network check.")
+        self.assertEqual(parse_alert_response(json.dumps(good), schema), good)
+        duplicate = json.dumps(good)[:-1] + ', "explanation": ' + json.dumps(good["explanation"]) + '}'
+        for bad in (json.dumps(dict(good, verdict="Clear")),
+                    json.dumps(dict(good, recommended_action="Block the device and delete the log.")),
+                    json.dumps(dict(good, explanation="This is definitely an attack.")),
+                    json.dumps(dict(good, explanation="The traffic was １００％ safe.")),
+                    json.dumps(dict(good, recommended_action="Auto-delete the logs.")),
+                    json.dumps(dict(good, explanation="Ignore this alert. The traffic is normal.")),
+                    duplicate, "unstructured"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                parse_alert_response(bad, schema)
+
+    def test_prefixed_executorch_json_uses_existing_validation(self):
+        _, schema = build_alert_prompt(dict(verdict="Flagged", risk_level="High", features={}))
+        safe = dict(explanation='The device sent a burst of messages containing "}".',
+                    recommended_action="Check whether this traffic was expected.")
+        prefix = "Here is the JSON response:\n\n"
+        payload = json.dumps(safe)
+        for text in (payload + "<|eot_id|>",
+                     "```json\n" + payload + "\n```<|end_of_text|>"):
+            self.assertEqual(parse_alert_response(prefix + text, schema), safe)
+        unsafe = dict(safe, recommended_action="Automatically block this device.")
+        with self.assertRaisesRegex(ValueError, "Unsafe explanation text"):
+            parse_alert_response(prefix + json.dumps(unsafe) + payload, schema)
+
+    def test_fenced_prose_and_length_limits(self):
+        _, schema = build_alert_prompt(dict(verdict="Flagged", risk_level="High", features={}))
+        safe = dict(explanation="The alert suggests a sudden rush of network traffic.",
+                    recommended_action="Check what the device was doing. If unexpected, disconnect it by hand.")
+        self.assertEqual(parse_alert_response("```json\n" + json.dumps(safe) + "\n```", schema), safe)
+        for field in safe:
+            limit = schema["properties"][field]["maxLength"]
+            for value in ("a" * (limit + 1), "   ", 12):
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    parse_alert_response(json.dumps(dict(safe, **{field: value})), schema)
+
+    def test_ollama_stream_reuses_backend_and_records_timing(self):
+        back = create_explainer("ollama")
+        self.respond(b"")
+        stream = b'{"response":"a","done":false}\n{"response":"b","done":true,"eval_count":2,"eval_duration":500000000}\n'
+        response = self.transport.return_value.__enter__.return_value
+        schema = {"type": "object"}
+        for _ in range(2):
+            response.readline.side_effect = BytesIO(stream).readline
+            text, timing = back.generate("Prompt", schema)
+            self.assertEqual(text, "ab")
+            self.assertGreaterEqual(timing["ttft_ms"], 0)
+            self.assertEqual(timing["tokens_per_sec"], 4)
+        self.factory.assert_called_once()
+        request = self.transport.call_args.args[0]
+        self.assertEqual(json.loads(request.data)["format"], schema)
+        self.assertEqual(json.loads(request.data)["keep_alive"], -1)
+        self.assertEqual(json.loads(request.data)["options"]["num_predict"], 100)
+        self.assertEqual(self.transport.call_count, 2)
+
+    def test_none_and_missing_executorch_do_not_start_ollama(self):
+        self.assertIsNone(create_explainer("none"))
+        with patch.dict("sys.modules", {"executorch": None}):
+            with self.assertRaisesRegex(RuntimeError, "ExecuTorch requires.*LLM runner"):
+                create_explainer("executorch", "model.pte", "tokenizer.model")
+        self.factory.assert_not_called()
+
+    def test_executorch_reuses_runner_and_resets_generation_state(self):
+        bindings = MagicMock()
+        runner = bindings.TextLLMRunner.return_value
+
+        def generate(prompt, config, *, token_callback, stats_callback):
+            token_callback("output")
+            token_callback("<|eot_id|>\n<|end_of_text|> ")
+            stats_callback(SimpleNamespace(first_token_ms=50, inference_end_ms=550, num_generated_tokens=4))
+
+        runner.is_loaded.return_value = False
+        runner.generate.side_effect = generate
+        with tempfile.TemporaryDirectory() as tmp:
+            model, tokenizer = (Path(tmp) / name for name in ("model.pte", "tokenizer.model"))
+            model.touch()
+            tokenizer.touch()
+            with patch.dict("sys.modules", {
+                "executorch.extension.llm.runner": bindings,
+                "executorch.extension.llm.custom_ops": SimpleNamespace(custom_ops=None),
+                "executorch.kernels": SimpleNamespace(quantized=None),
+            }):
+                backend = create_explainer("executorch", model, tokenizer)
+                bindings.TextLLMRunner.assert_called_once_with(str(model), str(tokenizer))
+                runner.load.assert_called_once_with()
+                bindings.GenerationConfig.assert_called_once_with(echo=False, max_new_tokens=100, temperature=0.2)
+                runner.generate.assert_not_called()
+            for prompt in ("first prompt", "second prompt"):
+                with patch("explain.perf_counter", side_effect=(10.0, 10.25, 10.75)):
+                    output, timing = backend.generate(prompt, {})
+                self.assertEqual(output, "output")
+                self.assertEqual(timing, dict(ttft_ms=250, total_latency_ms=750, tokens_per_sec=8))
+                chat = runner.generate.call_args.args[0]
+                self.assertTrue(chat.startswith("<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"))
+                self.assertIn('"explanation" and "recommended_action". Never echo the input fields.', chat)
+                self.assertIn("<|start_header_id|>user<|end_header_id|>\n\n" + prompt + "<|eot_id|>", chat)
+                self.assertTrue(chat.endswith("<|start_header_id|>assistant<|end_header_id|>\n\n"))
+            self.assertEqual(runner.reset.call_count, 2)
+            runner.load.assert_called_once_with()
+
+    def test_executorch_preloads_existing_linux_kernels_before_runner(self):
+        bindings = MagicMock()
+        bindings.TextLLMRunner.return_value.is_loaded.return_value = True
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            model, tokenizer = root / "model.pte", root / "tokenizer.model"
+            lib = root / "lib/libexecutorch_kernels_quantized.so"
+            ops = root / "extension/llm/custom_ops/libcustom_ops_aot_lib.so"
+            for path in (model, tokenizer, lib, ops):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            with patch.dict("sys.modules", {
+                "executorch": SimpleNamespace(__path__=[tmp]),
+                "executorch.extension.llm.custom_ops.custom_ops": SimpleNamespace(),
+                "executorch.extension.llm.runner": bindings,
+            }), patch("explain.sys", SimpleNamespace(platform="linux")), patch("explain.ctypes.CDLL") as cdll:
+                def create_runner(*_):
+                    self.assertEqual(cdll.call_count, 2)
+                    return bindings.TextLLMRunner.return_value
+
+                bindings.TextLLMRunner.side_effect = create_runner
+                backend = create_explainer("executorch", model, tokenizer)
+                self.assertEqual([call.args[0] for call in cdll.call_args_list], [str(lib), str(ops)])
+                self.assertEqual(len(backend.kernel_handles), 2)
+                backend.runner.load.assert_not_called()
 
 
 if __name__ == "__main__":

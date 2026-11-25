@@ -3,7 +3,6 @@ import argparse
 import csv
 import json
 import math
-import statistics
 import socket
 import struct
 import sys
@@ -11,53 +10,60 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
-from scapy.all import IP, TCP, UDP, PcapReader, conf, sniff
+from scapy.all import Ether, ICMP, IP, TCP, UDP, PcapReader, RawPcapReader, conf, sniff
 from scapy.error import Scapy_Exception
 
 DIRECTIONS = ("SRC_TO_DST", "DST_TO_SRC")
-FEATURE_COLUMNS = ["IN_PKTS", "OUT_PKTS", "IN_BYTES", "OUT_BYTES", "FLOW_DURATION_MILLISECONDS"]
-FEATURE_COLUMNS += [f"{direction}_IAT_{stat}" for direction in DIRECTIONS
-                    for stat in ("MIN", "MAX", "AVG", "STDDEV")]
+MODEL_FEATURE_COLUMNS = [
+    "PROTOCOL_NUM", "IN_PKTS", "OUT_PKTS", "IN_BYTES", "OUT_BYTES",
+    "FLOW_DURATION_MILLISECONDS", "PKTS_PER_SEC", "BYTES_PER_SEC",
+    "IN_OUT_PKT_RATIO", "IN_OUT_BYTE_RATIO", "PKT_LEN_MIN", "PKT_LEN_MAX",
+    "PKT_LEN_MEAN", "PKT_LEN_STD", "TTL_MEAN", "SYN_RATIO", "ACK_RATIO",
+    "FIN_RATIO", "RST_RATIO", "PSH_RATIO", "URG_RATIO",
+]
+MODEL_FEATURE_COLUMNS += [f"{direction}_IAT_{stat}" for direction in DIRECTIONS
+                          for stat in ("MIN", "MAX", "AVG", "STDDEV")]
+FEATURE_COLUMNS = MODEL_FEATURE_COLUMNS
+PROTOCOL_NAMES = {1: "ICMP", 6: "TCP", 17: "UDP"}
+FLAG_BITS = (2, 16, 1, 4, 8, 32)
 META_COLUMNS = ["src_ip", "dst_ip", "src_port", "dst_port", "protocol",
-                "flow_start_ts", "flow_end_ts", "emit_reason", "emit_delay_ms"]
+                "flow_start_ts", "flow_end_ts", "emit_reason", "emit_delay_ms", "tcp_initial_flags"]
+RECEIVE_BUFFER_BYTES = 16 * 1024 * 1024
 
 
-class Direction:
-    """Merge batches of 64 gaps to keep exact-count population moments in bounded space."""
+class Moments:
+    """Online population variance, without storing individual observations."""
     def __init__(self):
-        self.packets = self.size = self.count = 0
-        self.last = None
+        self.count = 0
         self.low, self.high = math.inf, -math.inf
         self.mean = self.m2 = 0.0
-        self.batch = []
 
-    def merge(self):
-        gaps = self.batch
-        if gaps:
-            n = len(gaps)
-            delta = statistics.mean(gaps) - self.mean
-            total = self.count + n
-            self.m2 += n * statistics.pstdev(gaps)**2 + delta**2 * self.count * n / total
-            self.mean += delta * n / total
-            self.count = total
-            gaps.clear()
-
-    def add(self, timestamp, size):
-        if self.last is not None:
-            gap = (timestamp - self.last) * 1000
-            self.low, self.high = min(self.low, gap), max(self.high, gap)
-            self.batch.append(gap)
-            if len(self.batch) == 64:
-                self.merge()
-        self.last = timestamp
-        self.packets += 1
-        self.size += size
+    def add(self, value):
+        self.count += 1
+        self.low = min(self.low, value)
+        self.high = max(self.high, value)
+        delta = value - self.mean
+        self.mean += delta / self.count
+        self.m2 += delta * (value - self.mean)
 
     def summary(self):
-        self.merge()
         if not self.count:
             return [0.0] * 4
         return [self.low, self.high, self.mean, math.sqrt(self.m2 / self.count)]
+
+
+class Direction:
+    def __init__(self):
+        self.packets = self.size = 0
+        self.last = None
+        self.gaps = Moments()
+
+    def add(self, timestamp, size):
+        if self.last is not None:
+            self.gaps.add((timestamp - self.last) * 1000)
+        self.last = timestamp
+        self.packets += 1
+        self.size += size
 
 
 class FlowEngine:
@@ -76,26 +82,37 @@ class FlowEngine:
         self.started = time.monotonic()
         self.finished = None
         self.dropped = None
+        self.flows_dropped = 0
+        self.receive_buffer_bytes = None
+        self.capture_backend = None
 
     def counters(self):
         elapsed = (self.finished or time.monotonic()) - self.started
         return dict(packets_seen=self.seen, packets_skipped=self.skipped,
-                    packets_dropped=self.dropped, flows_emitted=self.emitted,
+                    packets_dropped=self.dropped, flows_emitted=self.emitted, flows_dropped=self.flows_dropped,
+                    receive_buffer_bytes=self.receive_buffer_bytes, capture_backend=self.capture_backend,
                     open_flows=len(self.flows), packets_per_sec=round(self.seen / max(elapsed, 1e-6), 2),
                     avg_emit_delay_ms=round(self.total_delay / max(1, self.emitted), 3))
 
     def emit(self, key, reason):
-        first, start, directions = self.flows.pop(key)
+        first, start, directions, lengths, totals, initial_flags = self.flows.pop(key)
         end = self.activity.pop(key)
         forward, reverse = directions
         delay = round((self.clock - end) * 1000, 3)
         self.total_delay += delay
         self.emitted += 1
-        values = [forward.packets, reverse.packets, forward.size, reverse.size,
-                  (end - start) * 1000, *forward.summary(), *reverse.summary()]
-        meta = [*first, start, end, reason, delay]
+        duration = end - start
+        count = lengths.count
+        size = forward.size + reverse.size
+        values = [key[-1], forward.packets, reverse.packets, forward.size, reverse.size,
+                  duration * 1000, count / duration if duration else 0.0,
+                  size / duration if duration else 0.0,
+                  forward.packets / (reverse.packets + 1), forward.size / (reverse.size + 1),
+                  *lengths.summary(), *(total / count for total in totals),
+                  *forward.gaps.summary(), *reverse.gaps.summary()]
+        meta = [*first, start, end, reason, delay, initial_flags]
         return {"metadata": dict(zip(META_COLUMNS, meta)),
-                "features": dict(zip(FEATURE_COLUMNS, (round(v, 3) for v in values)))}
+                "features": dict(zip(MODEL_FEATURE_COLUMNS, values))}
 
     def expire(self, timestamp):
         self.clock = max(self.clock, timestamp)
@@ -109,28 +126,45 @@ class FlowEngine:
             yield self.emit(oldest, "active_timeout") if active_at <= idle_at else self.emit(idle, "idle_timeout")
 
     def feed(self, packet):
-        self.seen += 1
-        yield from self.expire(float(packet.time))
+        if isinstance(packet, Ether):
+            yield from self.feed_fields(float(packet.time), ethernet_fields(bytes(packet)))
+            return
         ip = packet.getlayer(IP)
-        if ip is None or ip.frag or ip.flags.MF or not isinstance(ip.payload, (TCP, UDP)):
+        fields = None
+        if ip is not None and not ip.frag and not ip.flags.MF:
+            layer = ip.payload
+            if isinstance(layer, (TCP, UDP, ICMP)):
+                icmp = isinstance(layer, ICMP)
+                fields = (ip.src, ip.dst, 0 if icmp else layer.sport, 0 if icmp else layer.dport,
+                          int(ip.proto), int(ip.len) if ip.len is not None else len(ip), int(ip.ttl),
+                          int(layer.flags) if isinstance(layer, TCP) else 0)
+        yield from self.feed_fields(float(packet.time), fields)
+
+    def feed_fields(self, timestamp, fields):
+        self.seen += 1
+        yield from self.expire(timestamp)
+        if fields is None:
             self.skipped += 1
             return
-        transport = ip.payload
-        tcp = isinstance(transport, TCP)
-        src, dst = (ip.src, transport.sport), (ip.dst, transport.dport)
-        proto = "TCP" if tcp else "UDP"
-        key = (*sorted((src, dst)), proto)
-        endpoints = (src[0], dst[0], src[1], dst[1], proto)
+        src_ip, dst_ip, sport, dport, number, size, ttl, flags = fields
+        key = (*sorted(((src_ip, sport), (dst_ip, dport))), number)
+        endpoints = (src_ip, dst_ip, sport, dport, PROTOCOL_NAMES[number])
         if key not in self.flows:
             if len(self.flows) == self.cap:
                 yield self.emit(next(iter(self.flows)), "capacity")
-            self.flows[key] = (endpoints, self.clock, (Direction(), Direction()))
-        first, _, directions = self.flows[key]
-        directions[int(first != endpoints)].add(self.clock, int(ip.len) if ip.len is not None else len(ip))
+            self.flows[key] = (endpoints, self.clock, (Direction(), Direction()), Moments(), [0] * 7,
+                               flags if number == 6 else None)
+        first, _, directions, lengths, totals, _ = self.flows[key]
+        directions[int(first != endpoints)].add(self.clock, size)
+        lengths.add(size)
+        totals[0] += ttl
+        if flags:
+            for index, bit in enumerate(FLAG_BITS, 1):
+                totals[index] += bool(flags & bit)
         self.activity[key] = self.clock
         self.activity.move_to_end(key)
-        if tcp and int(transport.flags) & 5:
-            yield self.emit(key, "rst" if int(transport.flags) & 4 else "fin")
+        if flags & 5:
+            yield self.emit(key, "rst" if flags & 4 else "fin")
 
     def flush(self, reason):
         while self.flows:
@@ -138,48 +172,157 @@ class FlowEngine:
         self.finished = time.monotonic()
 
 
-def iter_pcap_flows(path, engine=None, stop=None):
+def ethernet_fields(frame):
+    """Read just the outer IPv4 and transport headers in an Ethernet frame."""
+    offset = 14
+    if len(frame) < offset:
+        return None
+    kind = int.from_bytes(frame[12:14], "big")
+    while kind in (0x8100, 0x88a8, 0x9100):
+        if len(frame) < offset + 4:
+            return None
+        kind = int.from_bytes(frame[offset + 2:offset + 4], "big")
+        offset += 4
+    if kind != 0x800 or len(frame) < offset + 20 or frame[offset] >> 4 != 4:
+        return None
+    header_size = (frame[offset] & 15) * 4
+    size, _, fragment = struct.unpack_from("!HHH", frame, offset + 2)
+    ttl, number = frame[offset + 8:offset + 10]
+    minimum = {1: 8, 6: 20, 17: 8}.get(number)
+    if minimum is None or fragment & 0x3fff or header_size < 20:
+        return None
+    transport = offset + header_size
+    if size < header_size + minimum or len(frame) < transport + minimum:
+        return None
+    src = socket.inet_ntoa(frame[offset + 12:offset + 16])
+    dst = socket.inet_ntoa(frame[offset + 16:offset + 20])
+    ports = (0, 0) if number == 1 else struct.unpack_from("!HH", frame, transport)
+    flags = frame[transport + 13] if number == 6 else 0
+    return src, dst, *ports, number, size, ttl, flags
+
+
+def capture_events(path, engine):
+    # Ethernet PCAPs need only a few header fields. Scapy handles other link
+    # types and PCAPNG, including captures with multiple interfaces.
+    with RawPcapReader(str(path)) as reader:
+        if getattr(reader, "linktype", None) == 1 and hasattr(reader, "nano"):
+            scale = 1e9 if reader.nano else 1e6
+            for frame, meta in reader:
+                yield engine.feed_fields(meta.sec + meta.usec / scale, ethernet_fields(frame))
+            return
+    with PcapReader(str(path)) as reader:
+        for packet in reader:
+            yield engine.feed(packet)
+
+
+def iter_pcap_flows(path, engine=None, stop=None, max_packets=None, max_flows=None, stats=None):
+    """Stop reading at either cap, finalize open state, and yield up to max_flows."""
     engine = engine or FlowEngine()
-    reason = "eof"
+    if any(cap is not None and cap < 1 for cap in (max_packets, max_flows)):
+        raise ValueError("capture limits must be positive")
+    reason, written = "eof", 0
+    events = capture_events(path, engine)
     try:
-        with PcapReader(str(path)) as reader:
-            for packet in reader:
-                if stop is not None and stop.is_set():
-                    reason = "interrupt"
-                    break
-                yield from engine.feed(packet)
+        while True:
+            if stop is not None and stop.is_set():
+                reason = "interrupt"
+                break
+            if max_flows is not None and written >= max_flows:
+                reason = "flow_cap"
+                break
+            if max_packets is not None and engine.seen >= max_packets:
+                reason = "packet_cap"
+                break
+            packet_rows = next(events, None)
+            if packet_rows is None:
+                break
+            for row in packet_rows:
+                if max_flows is None or written < max_flows:
+                    written += 1
+                    yield row
     except KeyboardInterrupt:
         reason = "interrupt"
-    yield from engine.flush(reason)
+    finally:
+        events.close()
+    for row in engine.flush(reason):
+        if max_flows is None or written < max_flows:
+            written += 1
+            yield row
+    if stats is not None:
+        stats.update(reason=reason, packets_read=engine.seen, flows_written=written,
+                     flows_over_cap=engine.emitted - written)
 
 
-def stream_live_flows(interface, on_flow, engine=None, stop=None):
+def configure_receive_buffer(raw):
+    try:
+        raw.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RECEIVE_BUFFER_BYTES)
+    except OSError:
+        pass
+    try:
+        # Linux reports the effective buffer, including its bookkeeping allowance.
+        return raw.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+    except OSError:
+        return None
+
+
+def sample_packet_drops(raw, engine):
+    try:
+        stats = raw.getsockopt(263, 6, 8)  # SOL_PACKET, PACKET_STATISTICS; resets on read.
+    except OSError:
+        return
+    engine.dropped = (engine.dropped or 0) + struct.unpack("=II", stats)[1]
+
+
+def receive_ethernet(sock, raw, engine, deliver, stop):
+    raw.settimeout(0.5)
+    next_stats = time.monotonic() + 0.5
+    while stop is None or not stop.is_set():
+        try:
+            _, data, timestamp = sock.recv_raw()
+        except TimeoutError:
+            # Advance wall time only when the receive buffer is empty.
+            deliver(engine.expire(time.time()))
+        else:
+            if data:
+                deliver(engine.feed_fields(float(timestamp) if timestamp is not None else time.time(),
+                                           ethernet_fields(data)))
+        now = time.monotonic()
+        if now >= next_stats:
+            sample_packet_drops(raw, engine)
+            next_stats = now + 0.5
+
+
+def stream_live_flows(interface, on_flow, engine=None, stop=None, measure=None):
     engine = engine or FlowEngine()
 
     def deliver(rows):
-        for row in rows:
+        for row in (measure(rows) if measure else rows):
             on_flow(row)
 
     sock = conf.L2listen(iface=interface)
+    raw = getattr(sock, "ins", None)
+    af_packet = sys.platform.startswith("linux") and getattr(raw, "family", None) == socket.AF_PACKET
     try:
+        if af_packet:
+            engine.receive_buffer_bytes = configure_receive_buffer(raw)
+            if getattr(sock, "LL", None) is Ether:
+                engine.capture_backend = "af_packet_ethernet"
+                receive_ethernet(sock, raw, engine, deliver, stop)
+                return
+        engine.capture_backend = "scapy"
         while stop is None or not stop.is_set():
             sniff(opened_socket=sock, store=False, timeout=0.5, chainCC=True,
                   prn=lambda packet: deliver(engine.feed(packet)))
             if sock.closed:
                 raise OSError("Capture socket closed during sniffing")
-            # Linux AF_PACKET returns (received, dropped) since the last read.
-            raw = getattr(sock, "ins", None)
-            if sys.platform.startswith("linux") and getattr(raw, "family", None) == socket.AF_PACKET:
-                try:
-                    stats = raw.getsockopt(263, 6, 8)  # SOL_PACKET, PACKET_STATISTICS
-                except OSError:
-                    engine.dropped = None
-                else:
-                    engine.dropped = (engine.dropped or 0) + struct.unpack("=II", stats)[1]
+            if af_packet:
+                sample_packet_drops(raw, engine)
             deliver(engine.expire(time.time()))
     except KeyboardInterrupt:
         pass
     finally:
+        if af_packet:
+            sample_packet_drops(raw, engine)
         sock.close()
         deliver(engine.flush("interrupt"))
 
